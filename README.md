@@ -1,2 +1,2 @@
-# bulkusers
-Script to bulk user creation in multi-job.
+# License-Retention
+Mechanism to update user licenses based on SQL db (To be added more details in v1)
