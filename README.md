@@ -1,5 +1,7 @@
-# License-Retention
-Code documantion to be completed..
+# App-SQL-IdentityProvision
+
+Provision users using a mechanism which will keep the users updated and in sync with the main HR DB
+The users will be provisioned as cloud identities and updated regularly with this custom mechanism. 
 
 ## Syncronization process
 ![Syncronization process](<removed-image>)
@@ -11,7 +13,7 @@ Code documantion to be completed..
 *	Logs are written to Sync_Log table.
 
 
-## Application Configuration
+## Azure Configuration
 * Configure VM with AAD identity
 
 ![Configure the machine with AAD identity](<removed-image>)
@@ -75,8 +77,70 @@ ALTER ROLE db_datawriter ADD MEMBER clicksrv
 
 ```
 
+## Application Configuration
+
+### Configuration filename: *ClickSync.runtimeconfig.json*
+
+**userPrincipalNameSuffix (string) –** The suffix of the userPrincipalName to use when creating users, this suffix must be a verified domain in the tenant.
+
+**sqldb_connection (string) –** SQL connection string (example: "Data Source=xx.database.windows.net; Initial Catalog=yy;")
+
+**rowsPerCycle (integer) –** How many rows to read at once (effects memory consumption)
+
+**sendMailNotification (boolean) –** Whether to send mail notifications.
+
+**mailNotificationTo (string) –** Email address to send the notifications to.
+
+**mailNotificationFrom (string) –** Email to send the notifications from, must be member of the tenant and give permissions to the MSI to send emails. (Mail.Send)
+
+**Debug (boolean) –** Get more verbose logging in the console.
+
+**disableUsers (Boolean) –** Whether to disable users that isActive column in Pratim_pp table is set to false.
+
+**maxRetirements (int) –** The maximum users to remove out of groups when RetirementDate is today or before today and ClickSynced is 0, if the number of rows in the database exceeds this value an error will be issued and the users will not be removed from groups in AAD.
+
+**licenseGroups (string) –** comma separated string of AAD group object id’s, retired users will be removed from those groups (make sure there are no spaces in the string).
+
+### The application requires log table in the same database:
+```sql
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[Sync_log](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[date] [datetime] NOT NULL,
+	[type] [nvarchar](15) NOT NULL,
+	[description] [nvarchar](max) NOT NULL,
+ CONSTRAINT [PK_Sync_log] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+) WITH (STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+GO
+
+```
 ## Troubleshooting
-To be added
+
+To get the roles the application gets from Microsoft Graph run ClickSync.exe *printRoles*.
+You should see the following roles:
+
+*User.ReadWrite.All*
+
+*Directory.ReadWrite.All*
+
+*Group.ReadWrite.All*
+
+*GroupMember.ReadWrite.All*
+
+*Mail.Send*
+
 
 ## Test results
-To be added
+
+Performance testing to provide some benchmark results:
+* 1000 user updates – about 2 min
+* 500 users removed from 2 groups – about 170 seconds
+
