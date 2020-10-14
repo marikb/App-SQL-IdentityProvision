@@ -1,6 +1,7 @@
 # App-SQL-IdentityProvision
 
-Provision users using a mechanism which will keep the users updated and in sync with the main HR DB
+Provision users using a mechanism which will keep the users updated and in sync with the main HR DB.
+
 The users will be provisioned as cloud identities and updated regularly with this custom mechanism. 
 
 ## Syncronization process
