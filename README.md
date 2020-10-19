@@ -1,8 +1,6 @@
 # App-SQL-IdentityProvision
 
-Provision users using a mechanism which will keep the users updated and in sync with the main HR DB.
-
-The users will be provisioned as cloud identities and updated regularly with this custom mechanism. 
+Provision users using a mechanism which will keep the users updated and in sync with the main HR DB. The users will be provisioned as cloud identities and updated regularly with this custom mechanism. 
 
 ## Syncronization process
 ![Syncronization process](<removed-image>)
@@ -15,11 +13,11 @@ The users will be provisioned as cloud identities and updated regularly with thi
 
 
 ## Azure Configuration
-* Configure VM with AAD identity
+1. Configure VM with AAD identity
 
 ![Configure the machine with AAD identity](<removed-image>)
 
-* Assign permissions to Microsoft Graph to manage users
+2. Assign permissions to Microsoft Graph to manage users
 
 ```powershell
 $vmObjectId = "<redacted-vm-id>"
@@ -35,7 +33,7 @@ New-AzureADServiceAppRoleAssignment -Id $userReadWriteAllPermission.Id -ObjectId
 
 ```
 
-* Assign permissions to Microsoft Graph to send emails
+3. Assign permissions to Microsoft Graph to send emails
 
 ```powershell
 $vmObjectId = "<redacted-vm-id>"
@@ -51,7 +49,7 @@ New-AzureADServiceAppRoleAssignment -Id $mailSend.Id -ObjectId $msi.ObjectId -Pr
 
 ```
 
-* Assign permissions to Microsoft Graph to manage group membership
+4. Assign permissions to Microsoft Graph to manage group membership
 
 ```powershell
 $vmObjectId = "<redacted-vm-id>"
@@ -65,11 +63,11 @@ foreach($permission in $permissions){
 
 ```
 
-* Configure AAD admin in the SQL server 
+5. Configure AAD admin in the SQL server 
 
 ![Configure AAD admin in the SQL server ](<removed-image>)
 
-* Connect to the SQL server using the AAD admin and give permissions to the VM
+6. Connect to the SQL server using the AAD admin and give permissions to the VM
 
 ```sql
 CREATE USER clicksrv FROM EXTERNAL PROVIDER
@@ -82,25 +80,25 @@ ALTER ROLE db_datawriter ADD MEMBER clicksrv
 
 ### Configuration filename: *ClickSync.runtimeconfig.json*
 
-**userPrincipalNameSuffix (string) –** The suffix of the userPrincipalName to use when creating users, this suffix must be a verified domain in the tenant.
+- `userPrincipalNameSuffix (string)` The suffix of the userPrincipalName to use when creating users, this suffix must be a verified domain in the tenant.
 
-**sqldb_connection (string) –** SQL connection string (example: "Data Source=xx.database.windows.net; Initial Catalog=yy;")
+- `sqldb_connection (string)` SQL connection string (example: "Data Source=xx.database.windows.net; Initial Catalog=yy;")
 
-**rowsPerCycle (integer) –** How many rows to read at once (effects memory consumption)
+- `rowsPerCycle (integer)` How many rows to read at once (effects memory consumption)
 
-**sendMailNotification (boolean) –** Whether to send mail notifications.
+- `sendMailNotification (boolean)` Whether to send mail notifications.
 
-**mailNotificationTo (string) –** Email address to send the notifications to.
+- `mailNotificationTo (string)` Email address to send the notifications to.
 
-**mailNotificationFrom (string) –** Email to send the notifications from, must be member of the tenant and give permissions to the MSI to send emails. (Mail.Send)
+- `mailNotificationFrom (string)` Email to send the notifications from, must be member of the tenant and give permissions to the MSI to send emails. (Mail.Send)
 
-**Debug (boolean) –** Get more verbose logging in the console.
+- `Debug (boolean)` Get more verbose logging in the console.
 
-**disableUsers (Boolean) –** Whether to disable users that isActive column in Pratim_pp table is set to false.
+- `disableUsers (Boolean)` Whether to disable users that isActive column in Pratim_pp table is set to false.
 
-**maxRetirements (int) –** The maximum users to remove out of groups when RetirementDate is today or before today and ClickSynced is 0, if the number of rows in the database exceeds this value an error will be issued and the users will not be removed from groups in AAD.
+- `maxRetirements (int)` The maximum users to remove out of groups when RetirementDate is today or before today and ClickSynced is 0, if the number of rows in the database exceeds this value an error will be issued and the users will not be removed from groups in AAD.
 
-**licenseGroups (string) –** comma separated string of AAD group object id’s, retired users will be removed from those groups (make sure there are no spaces in the string).
+- `*licenseGroups (string)` comma separated string of AAD group object id’s, retired users will be removed from those groups (make sure there are no spaces in the string).
 
 ### The application requires log table in the same database:
 ```sql
