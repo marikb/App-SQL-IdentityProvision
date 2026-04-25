@@ -65,7 +65,7 @@ foreach($permission in $permissions){
 
 5. Configure AAD admin in the SQL server 
 
-![Configure AAD admin in the SQL server ](<removed-image>)
+![Configure AAD admin in the SQL server](docs/sql-overview.jpg)
 
 6. Connect to the SQL server using the AAD admin and give permissions to the VM
 
