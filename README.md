@@ -3,7 +3,6 @@
 Provision users using a mechanism which will keep the users updated and in sync with the main HR DB. The users will be provisioned as cloud identities and updated regularly with this custom mechanism. 
 
 ## Syncronization process
-![Syncronization process](<removed-image>)
 
 *	Authentication is based on Azure managed identity (passwordless).
 *	User creation/update and mail notifications are based on Microsoft Graph.
@@ -14,8 +13,6 @@ Provision users using a mechanism which will keep the users updated and in sync 
 
 ## Azure Configuration
 1. Configure VM with AAD identity
-
-![Configure the machine with AAD identity](<removed-image>)
 
 2. Assign permissions to Microsoft Graph to manage users
 
