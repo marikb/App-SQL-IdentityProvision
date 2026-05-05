@@ -3,25 +3,13 @@
     "userPrincipalNameSuffix": "@example.com",
     "sqldb_connection": "Data Source=<redacted-sql-host>; Initial Catalog=<redacted-db>;",
     "rowsPerCycle": 500,
-    "sendMailNotification": yes,
+    "sendMailNotification": true,
     "mailNotificationTo": "<redacted-email>",
     "mailNotificationFrom": "<redacted-email>",
     "debug": true,
     "disableUsers": true,
     "maxRetirements": 500,
     "maxChanges": 500,
-    "licenseGroups": "<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>",
-"<redacted-guid>"
+    "licenseGroups": "<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>"
   }
 }
