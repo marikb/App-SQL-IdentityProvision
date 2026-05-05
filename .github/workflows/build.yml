@@ -1,0 +1,18 @@
+name: build
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [deps/dependabot-bumps]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '3.1.x'
+      - run: dotnet restore SyncApp/ClickSync.csproj
+      - run: dotnet build SyncApp/ClickSync.csproj --no-restore --configuration Release
