@@ -3,6 +3,7 @@
 Provision users using a mechanism which will keep the users updated and in sync with the main HR DB. The users will be provisioned as cloud identities and updated regularly with this custom mechanism. 
 
 ## Syncronization process
+![Syncronization process](docs/sync-process.jpg)
 
 *	Authentication is based on Azure managed identity (passwordless).
 *	User creation/update and mail notifications are based on Microsoft Graph.
@@ -14,10 +15,12 @@ Provision users using a mechanism which will keep the users updated and in sync 
 ## Azure Configuration
 1. Configure VM with AAD identity
 
+![Configure the machine with AAD identity](docs/vm-aad-identity.jpg)
+
 2. Assign permissions to Microsoft Graph to manage users
 
 ```powershell
-$vmObjectId = "<redacted-vm-id>"
+$vmObjectId = "<your-vm-managed-identity-object-id>"
 Connect-AzureAD
 $graph = Get-AzureADServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
 $userReadWriteAllPermission = $graph.AppRoles `
@@ -33,7 +36,7 @@ New-AzureADServiceAppRoleAssignment -Id $userReadWriteAllPermission.Id -ObjectId
 3. Assign permissions to Microsoft Graph to send emails
 
 ```powershell
-$vmObjectId = "<redacted-vm-id>"
+$vmObjectId = "<your-vm-managed-identity-object-id>"
 Connect-AzureAD
 $graph = Get-AzureADServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
 $mailSend = $graph.AppRoles `
@@ -49,7 +52,7 @@ New-AzureADServiceAppRoleAssignment -Id $mailSend.Id -ObjectId $msi.ObjectId -Pr
 4. Assign permissions to Microsoft Graph to manage group membership
 
 ```powershell
-$vmObjectId = "<redacted-vm-id>"
+$vmObjectId = "<your-vm-managed-identity-object-id>"
 $graph = Get-AzureADServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
 $permissions = @("GroupMember.ReadWrite.All", "Group.ReadWrite.All", "Directory.ReadWrite.All")
 $msi = Get-AzureADServicePrincipal -ObjectId $vmObjectId
