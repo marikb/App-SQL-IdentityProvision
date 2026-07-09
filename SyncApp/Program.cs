@@ -1,6 +1,7 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using Azure.Identity;
 using Microsoft.Graph;
 using System.Linq;
 
@@ -8,6 +9,7 @@ namespace ClickSync
 {
     class Program
     {
+        public static DefaultAzureCredential credential = new DefaultAzureCredential();
         public static GraphServiceClient graphServiceClient;
         public static string userPrincipalNameSuffix;
         public static bool disableUsers = false;
@@ -21,7 +23,7 @@ namespace ClickSync
         {
             if(args.Length > 0 && args[0].ToLower() == "printroles")
                 await GraphHelper.PrintRoles();
-            
+
             var watch = System.Diagnostics.Stopwatch.StartNew();
 
             #region Collect values
@@ -39,13 +41,13 @@ namespace ClickSync
             bool parsed = int.TryParse(strRowsPerCycle, out rowsPerCycle);
             if(!parsed)
                 rowsPerCycle = 100;
-            
+
             string strMaxRetirements = GetValue("maxRetirements");
             int maxRetirements;
             parsed = int.TryParse(strMaxRetirements, out maxRetirements);
             if(!parsed)
                 maxRetirements = 500;
-            
+
             string strMaxChanges = GetValue("maxChanges");
             int maxChanges;
             parsed = int.TryParse(strMaxChanges, out maxChanges);
@@ -55,13 +57,13 @@ namespace ClickSync
             string strLicenseGroups = GetValue("licenseGroups");
             var licenseGroups = strLicenseGroups.Split(',').ToList();
             #endregion
-            
-            graphServiceClient = await GraphHelper.GetGraphApiClient();
+
+            graphServiceClient = GraphHelper.GetGraphApiClient();
 
             DBHelper db = new DBHelper(sqlConnString);
             await db.Connect();
             db.WriteLog("INFORMATION", $"Starting synchronization");
-            
+
 
             var numberOfRetirements = await db.GetNumberOfRetirementsFromDB();
             bool allowGroupRemoval = numberOfRetirements < maxRetirements ? true : false;
@@ -74,7 +76,7 @@ namespace ClickSync
                 Program.errors++;
                 db.WriteLog("ERROR", $"There are {numberOfRetirements} retirements which is over the allowed number ({maxRetirements}).");
             }
-            
+
             var numberOfChanges = await db.GetNumberOfChangesFromDB();
             if(numberOfChanges < maxChanges)
                 await HandleUserUpdates(db,rowsPerCycle);
@@ -83,7 +85,7 @@ namespace ClickSync
                 Program.errors++;
                 db.WriteLog("ERROR", $"There are {numberOfChanges} changes which is over the allowed number ({maxChanges}).");
             }
-                
+
 
             watch.Stop();
             string message, subject;
@@ -131,7 +133,7 @@ namespace ClickSync
         }
 
         public static string GetValue(string valueName){
-            return Environment.GetEnvironmentVariable(valueName) != null ? Environment.GetEnvironmentVariable(valueName) : System.AppContext.GetData(valueName) as string; 
+            return Environment.GetEnvironmentVariable(valueName) != null ? Environment.GetEnvironmentVariable(valueName) : System.AppContext.GetData(valueName) as string;
         }
 
         public static void WriteLog(string level, string str){
@@ -165,7 +167,7 @@ namespace ClickSync
                         Console.ResetColor();
                         Console.Write(str);
                         Console.WriteLine();
-                    } 
+                    }
                     break;
             }
         }

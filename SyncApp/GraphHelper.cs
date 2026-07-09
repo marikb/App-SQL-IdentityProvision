@@ -1,38 +1,20 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Azure.Core;
 using Microsoft.Graph;
-using System.Net.Http.Headers;
-using Microsoft.Azure.Services.AppAuthentication;
+using Microsoft.Graph.Models;
+using Microsoft.Graph.Users.Item.CheckMemberGroups;
+using Microsoft.Graph.Users.Item.SendMail;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 
 namespace ClickSync
 {
     class GraphHelper{
-        public static async Task<GraphServiceClient> GetGraphApiClient()
+        public static GraphServiceClient GetGraphApiClient()
         {
-            try{
-                var azureServiceTokenProvider = new AzureServiceTokenProvider();
-                string accessToken = await azureServiceTokenProvider
-                    .GetAccessTokenAsync("https://graph.microsoft.com/");
-
-                var graphServiceClient = new GraphServiceClient(
-                    new DelegateAuthenticationProvider((requestMessage) =>
-                {
-                    requestMessage
-                            .Headers
-                            .Authorization = new AuthenticationHeaderValue("bearer", accessToken);
-
-                    return Task.CompletedTask;
-                }));
-
-                return graphServiceClient;
-            }catch(Exception ex){
-                Program.WriteLog("e",$"Error connecting Microsoft Graph.\n error: {ex.Message}");
-                Environment.Exit(-1);
-                return null;
-            }  
+            return new GraphServiceClient(Program.credential, new[] { "https://graph.microsoft.com/.default" });
         }
 
         public static async Task UpdateUserInGraph(ClickUser clickUser, DBHelper db)
@@ -43,15 +25,14 @@ namespace ClickSync
             user.MobilePhone = clickUser.mobilePhone;
             user.DisplayName = $"{clickUser.firstName} {clickUser.lastName}";
             user.State = "ClickSync";
-            
+
             if(Program.disableUsers)
                 user.AccountEnabled = clickUser.isActive;
 
             try
             {
                 Program.WriteLog("d",$"updating user {clickUser.tz}{Program.userPrincipalNameSuffix}");
-                var result =  await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"].Request().UpdateAsync(user);
-                string graphObjectId = clickUser.clickObjectID;               
+                await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"].PatchAsync(user);
                 await db.UpdateClickSynced(clickUser.tz);
                 Program.WriteLog("d",$"updated user {clickUser.tz}{Program.userPrincipalNameSuffix}");
                 Program.usersUpdated++;
@@ -71,9 +52,9 @@ namespace ClickSync
             try
             {
                 var result = await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"]
-                    .CheckMemberGroups(groupIds)
-                    .Request().PostAsync();
-                return result.ToList();
+                    .CheckMemberGroups
+                    .PostAsCheckMemberGroupsPostResponseAsync(new CheckMemberGroupsPostRequestBody { GroupIds = groupIds });
+                return result.Value.Select(g => g.ToString()).ToList();
             }
             catch (System.Exception ex)
             {
@@ -90,7 +71,7 @@ namespace ClickSync
         public static async Task RemoveUserFromGroupInGraph(ClickUser clickUser, string groupID, DBHelper db){
             try{
                 Program.WriteLog("d",$"removing user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
-                await Program.graphServiceClient.Groups[groupID].Members[clickUser.clickObjectID].Reference.Request().DeleteAsync();
+                await Program.graphServiceClient.Groups[groupID].Members[clickUser.clickObjectID].Ref.DeleteAsync();
                 await db.UpdateClickSynced(clickUser.tz);
                 Program.WriteLog("d",$"removed user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
             }catch(Exception ex){
@@ -109,7 +90,7 @@ namespace ClickSync
             bool.TryParse(strSendMailNotification, out sendMailNotification);
             if(!sendMailNotification)
                 return;
-                
+
             string to = Program.GetValue("mailNotificationTo");
             string from = Program.GetValue("mailNotificationFrom");
 
@@ -133,28 +114,25 @@ namespace ClickSync
                 }
             };
 
-            var saveToSentItems = true;
             try{
                 await Program.graphServiceClient.Users[from]
-                .SendMail(message, saveToSentItems)
-                .Request()
-                .PostAsync();
+                .SendMail
+                .PostAsync(new SendMailPostRequestBody { Message = message, SaveToSentItems = true });
             }catch(Exception ex){
                 string str = $"Error cannot send email, error: {ex.Message}";
                 Program.WriteLog("e",str);
             }
-            
+
         }
 
         public static async Task PrintRoles(){
-            var azureServiceTokenProvider = new AzureServiceTokenProvider();
-            string accessToken = await azureServiceTokenProvider.GetAccessTokenAsync("https://graph.microsoft.com/");
+            var accessToken = await Program.credential.GetTokenAsync(new TokenRequestContext(new[] { "https://graph.microsoft.com/.default" }));
             var handler = new JwtSecurityTokenHandler();
-            var token = handler.ReadToken(accessToken) as JwtSecurityToken;
+            var token = handler.ReadToken(accessToken.Token) as JwtSecurityToken;
             Console.WriteLine(token.Payload["roles"]);
             Environment.Exit(0);
         }
 
-        
+
     }
 }
