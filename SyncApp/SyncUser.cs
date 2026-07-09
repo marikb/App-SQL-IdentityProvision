@@ -1,27 +1,27 @@
 using System;
 using Microsoft.Data.SqlClient;
 
-namespace ClickSync
+namespace SyncApp
 {
-    class ClickUser{
+    class SyncUser{
         public string tz { get; set; }
         public string firstName { get; set; }
         public string lastName { get; set; }
         public string mobilePhone { get; set; }
         public DateTime retirementDate {get; set; }
         public bool? isActive {get;set;}
-        public bool clickSynced {get;set;}
-        public string clickObjectID { get; set; }
+        public bool synced {get;set;}
+        public string aadObjectID { get; set; }
         public byte[] rowVer { get; set; }
         public string upn { get { return $"{tz}{Program.userPrincipalNameSuffix}"; } }
 
-        public ClickUser(SqlDataReader reader)
+        public SyncUser(SqlDataReader reader)
         {
             this.tz = reader["TZ"].ToString();
             this.firstName = reader["FirstName"].ToString();
             this.lastName = reader["LastName"].ToString();
             this.mobilePhone = reader["MobilePhone"].ToString();
-            this.clickObjectID = reader["ClickObjectID"].ToString();
+            this.aadObjectID = reader["AADObjectID"].ToString();
             this.rowVer = (byte[])reader["RowVer"];
 
             int colIndex = reader.GetOrdinal("RetirementDate");
@@ -32,9 +32,9 @@ namespace ClickSync
             if(!reader.IsDBNull(colIndex))
                 this.isActive = reader.GetBoolean(colIndex);
 
-            colIndex = reader.GetOrdinal("ClickSynced");
+            colIndex = reader.GetOrdinal("Synced");
             if(!reader.IsDBNull(colIndex))
-                this.clickSynced = reader.GetBoolean(colIndex);
+                this.synced = reader.GetBoolean(colIndex);
 
         }
     }

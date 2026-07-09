@@ -5,7 +5,7 @@ using Azure.Identity;
 using Microsoft.Graph;
 using System.Linq;
 
-namespace ClickSync
+namespace SyncApp
 {
     class Program
     {
@@ -84,7 +84,7 @@ namespace ClickSync
                 missingValues += " mailNotificationFrom";
             if(missingValues != ""){
                 WriteLog("e",$"Missing required configuration values:{missingValues}");
-                await GraphHelper.SendMail($"Missing required configuration values:{missingValues}", "There was an error in Click synchronization process");
+                await GraphHelper.SendMail($"Missing required configuration values:{missingValues}", "There was an error in the synchronization process");
                 return 1;
             }
 
@@ -117,12 +117,12 @@ namespace ClickSync
             watch.Stop();
             string message, subject;
             if(errors > 0){
-                subject = "Click synchronization finished with errors";
+                subject = "Synchronization finished with errors";
                 message = $"Synchronization finished with errors please check the log table,\n" +
                 $"Updated {usersUpdated} users, processed {retirementsProcessed} retirements in {watch.ElapsedMilliseconds * 0.001} seconds.\n" +
                 $"Errors: {errors}";
             }else{
-                subject = "Click synchronization finished";
+                subject = "Synchronization finished";
                 message = $"Synchronization finished,\n" +
                 $"Updated {usersUpdated} users, processed {retirementsProcessed} retirements in {watch.ElapsedMilliseconds * 0.001} seconds.";
             }
@@ -139,48 +139,48 @@ namespace ClickSync
             string lastTZ = "";
             while (true)
             {
-                var clickUsers = await db.GetUsersFromDB(rowsPerCycle, lastTZ);
-                if (clickUsers.Count == 0)
+                var syncUsers = await db.GetUsersFromDB(rowsPerCycle, lastTZ);
+                if (syncUsers.Count == 0)
                     break;
-                foreach (ClickUser clickUser in clickUsers){
-                    if (await GraphHelper.UpdateUserInGraph(clickUser, db))
-                        await db.UpdateClickSynced(clickUser.tz, clickUser.rowVer);
+                foreach (SyncUser syncUser in syncUsers){
+                    if (await GraphHelper.UpdateUserInGraph(syncUser, db))
+                        await db.MarkSynced(syncUser.tz, syncUser.rowVer);
                     else
-                        await db.IncrementSyncErrorCount(clickUser.tz);
+                        await db.IncrementSyncErrorCount(syncUser.tz);
                 }
-                lastTZ = clickUsers[clickUsers.Count - 1].tz;
+                lastTZ = syncUsers[syncUsers.Count - 1].tz;
             }
         }
 
         public static async Task HandleGroupRemoval(DBHelper db, int rowsPerCycle, List<string> licenseGroups){
             string lastTZ = "";
             while(true){
-                var clickUsers = await db.GetRetirementsFromDB(rowsPerCycle, lastTZ);
-                if (clickUsers.Count == 0)
+                var syncUsers = await db.GetRetirementsFromDB(rowsPerCycle, lastTZ);
+                if (syncUsers.Count == 0)
                     break;
 
-                foreach (ClickUser clickUser in clickUsers){
-                    if (await ProcessRetirementInGraph(clickUser, db, licenseGroups)){
-                        await db.MarkRetirementProcessed(clickUser.tz);
+                foreach (SyncUser syncUser in syncUsers){
+                    if (await ProcessRetirementInGraph(syncUser, db, licenseGroups)){
+                        await db.MarkRetirementProcessed(syncUser.tz);
                         retirementsProcessed++;
                     }else
-                        await db.IncrementSyncErrorCount(clickUser.tz);
+                        await db.IncrementSyncErrorCount(syncUser.tz);
                 }
-                lastTZ = clickUsers[clickUsers.Count - 1].tz;
+                lastTZ = syncUsers[syncUsers.Count - 1].tz;
             }
         }
 
-        public static async Task<bool> ProcessRetirementInGraph(ClickUser clickUser, DBHelper db, List<string> licenseGroups){
-            if (disableUsers && !await GraphHelper.DisableUserInGraph(clickUser, db))
+        public static async Task<bool> ProcessRetirementInGraph(SyncUser syncUser, DBHelper db, List<string> licenseGroups){
+            if (disableUsers && !await GraphHelper.DisableUserInGraph(syncUser, db))
                 return false;
 
-            var groups2Remove = await GraphHelper.CheckUserGroupsInGraph(licenseGroups, clickUser, db);
+            var groups2Remove = await GraphHelper.CheckUserGroupsInGraph(licenseGroups, syncUser, db);
             if (groups2Remove == null)
                 return false;
 
             bool processed = true;
             foreach(var group in groups2Remove){
-                if (!await GraphHelper.RemoveUserFromGroupInGraph(clickUser, group, db))
+                if (!await GraphHelper.RemoveUserFromGroupInGraph(syncUser, group, db))
                     processed = false;
             }
             return processed;

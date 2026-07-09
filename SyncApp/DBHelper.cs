@@ -4,7 +4,7 @@ using Azure.Core;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 
-namespace ClickSync
+namespace SyncApp
 {
     class DBHelper{
         private string _sqlConnString;
@@ -27,7 +27,7 @@ namespace ClickSync
             catch (Exception ex)
             {
                 Program.WriteLog("e",$"Error connecting to SQL\n error: {ex.Message}");
-                await GraphHelper.SendMail($"Error connecting to SQL\n error: {ex.Message}", "There was an error in Click synchronization process");
+                await GraphHelper.SendMail($"Error connecting to SQL\n error: {ex.Message}", "There was an error in the synchronization process");
                 Environment.Exit(-1);
             }
         }
@@ -39,7 +39,7 @@ namespace ClickSync
         public async Task<int> GetNumberOfRetirementsFromDB(){
             try
             {
-                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE ClickObjectID IS NOT NULL AND RetirementProcessed=0 AND RetirementDate <= GETDATE()";
+                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND RetirementProcessed=0 AND RetirementDate <= GETDATE()";
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 return (int)cmd.ExecuteScalar();
             }
@@ -47,7 +47,7 @@ namespace ClickSync
             {
                 string message = $"Error getting number of retirements from SQL!\n error: {ex.Message}";
                 Program.WriteLog("e",message);
-                await GraphHelper.SendMail(message, "There was an error in Click synchronization process");
+                await GraphHelper.SendMail(message, "There was an error in the synchronization process");
                 Environment.Exit(-1);
                 return 0;
             }
@@ -56,7 +56,7 @@ namespace ClickSync
         public async Task<int> GetNumberOfChangesFromDB(){
             try
             {
-                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE ClickObjectID IS NOT NULL AND ClickSynced=0 AND SyncErrorCount<@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL)";
+                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND SyncErrorCount<@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL)";
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 cmd.Parameters.AddWithValue("@maxRetries", _maxSyncRetries);
                 return (int)cmd.ExecuteScalar();
@@ -65,7 +65,7 @@ namespace ClickSync
             {
                 string message = $"Error getting number of changes from SQL!\n error: {ex.Message}";
                 Program.WriteLog("e",message);
-                await GraphHelper.SendMail(message, "There was an error in Click synchronization process");
+                await GraphHelper.SendMail(message, "There was an error in the synchronization process");
                 Environment.Exit(-1);
                 return 0;
             }
@@ -74,7 +74,7 @@ namespace ClickSync
         public async Task<int> GetNumberOfSkippedChangesFromDB(){
             try
             {
-                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE ClickObjectID IS NOT NULL AND ClickSynced=0 AND SyncErrorCount>=@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL)";
+                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND SyncErrorCount>=@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL)";
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 cmd.Parameters.AddWithValue("@maxRetries", _maxSyncRetries);
                 return (int)cmd.ExecuteScalar();
@@ -83,66 +83,66 @@ namespace ClickSync
             {
                 string message = $"Error getting number of skipped users from SQL!\n error: {ex.Message}";
                 Program.WriteLog("e",message);
-                await GraphHelper.SendMail(message, "There was an error in Click synchronization process");
+                await GraphHelper.SendMail(message, "There was an error in the synchronization process");
                 Environment.Exit(-1);
                 return 0;
             }
         }
 
-        public async Task<List<ClickUser>> GetRetirementsFromDB(int numberOfUsersToGet, string afterTZ){
+        public async Task<List<SyncUser>> GetRetirementsFromDB(int numberOfUsersToGet, string afterTZ){
             try
             {
-                var sqlCommand = "SELECT TOP (@rows) * FROM [dbo].[Pratim_pp] WHERE ClickObjectID IS NOT NULL AND RetirementProcessed=0 AND RetirementDate <= GETDATE() AND TZ>@afterTZ ORDER BY TZ";
-                List<ClickUser> clickUsers = new List<ClickUser>();
+                var sqlCommand = "SELECT TOP (@rows) * FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND RetirementProcessed=0 AND RetirementDate <= GETDATE() AND TZ>@afterTZ ORDER BY TZ";
+                List<SyncUser> syncUsers = new List<SyncUser>();
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 cmd.Parameters.AddWithValue("@rows", numberOfUsersToGet);
                 cmd.Parameters.AddWithValue("@afterTZ", afterTZ);
                 SqlDataReader reader = cmd.ExecuteReader();
                 while (reader.Read())
-                    clickUsers.Add(new ClickUser(reader));
+                    syncUsers.Add(new SyncUser(reader));
                 reader.Close();
                 await reader.DisposeAsync();
-                return clickUsers;
+                return syncUsers;
             }
             catch (Exception ex)
             {
                 string message = $"Error getting retirement users from SQL!\n error: {ex.Message}";
                 Program.WriteLog("e",message);
-                await GraphHelper.SendMail(message, "There was an error in Click synchronization process");
+                await GraphHelper.SendMail(message, "There was an error in the synchronization process");
                 Environment.Exit(-1);
-                return new List<ClickUser>();
+                return new List<SyncUser>();
             }
         }
 
-        public async Task<List<ClickUser>> GetUsersFromDB(int numberOfUsersToGet, string afterTZ)
+        public async Task<List<SyncUser>> GetUsersFromDB(int numberOfUsersToGet, string afterTZ)
         {
             try
             {
-                List<ClickUser> clickUsers = new List<ClickUser>();
-                var sqlCommand = "SELECT TOP (@rows) * FROM [dbo].[Pratim_pp] WHERE ClickObjectID IS NOT NULL AND ClickSynced=0 AND SyncErrorCount<@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL) AND TZ>@afterTZ ORDER BY TZ";
+                List<SyncUser> syncUsers = new List<SyncUser>();
+                var sqlCommand = "SELECT TOP (@rows) * FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND SyncErrorCount<@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL) AND TZ>@afterTZ ORDER BY TZ";
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 cmd.Parameters.AddWithValue("@rows", numberOfUsersToGet);
                 cmd.Parameters.AddWithValue("@maxRetries", _maxSyncRetries);
                 cmd.Parameters.AddWithValue("@afterTZ", afterTZ);
                 SqlDataReader reader = cmd.ExecuteReader();
                 while (reader.Read())
-                    clickUsers.Add(new ClickUser(reader));
+                    syncUsers.Add(new SyncUser(reader));
                 reader.Close();
                 await reader.DisposeAsync();
-                return clickUsers;
+                return syncUsers;
             }
             catch (Exception ex)
             {
                 Program.WriteLog("e",$"Error getting users from SQL!\n error: {ex.Message}");
-                await GraphHelper.SendMail($"Error getting users from SQL!\n error: {ex.Message}", "There was an error in Click synchronization process");
+                await GraphHelper.SendMail($"Error getting users from SQL!\n error: {ex.Message}", "There was an error in the synchronization process");
                 Environment.Exit(-1);
-                return new List<ClickUser>();
+                return new List<SyncUser>();
             }
         }
 
-        public async Task UpdateClickSynced(string TZ, byte[] rowVer)
+        public async Task MarkSynced(string TZ, byte[] rowVer)
         {
-            await UpdateRow("UPDATE [dbo].[Pratim_pp] SET ClickSynced=1, SyncErrorCount=0, RetirementProcessed=0 WHERE TZ=@tz AND RowVer=@rowVer", TZ, rowVer);
+            await UpdateRow("UPDATE [dbo].[Pratim_pp] SET Synced=1, SyncErrorCount=0, RetirementProcessed=0 WHERE TZ=@tz AND RowVer=@rowVer", TZ, rowVer);
         }
 
         public async Task MarkRetirementProcessed(string TZ)
@@ -171,7 +171,7 @@ namespace ClickSync
                 string message = $"Error updating record in SQL command: {sqlCommand} error: {ex.Message}";
                 Program.WriteLog("e", message);
                 WriteLog("ERROR", message);
-                await GraphHelper.SendMail(message, "There was an error in Click synchronization process");
+                await GraphHelper.SendMail(message, "There was an error in the synchronization process");
                 Environment.Exit(-1);
             }
         }

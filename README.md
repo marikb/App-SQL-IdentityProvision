@@ -8,7 +8,7 @@ Keep cloud users updated and in sync with the main HR DB. The users are matched 
 *	Authentication is based on Azure managed identity (passwordless).
 *	User updates and mail notifications are based on Microsoft Graph.
 *	SQL is Azure SQL.
-*	Users updated will be stamped “ClickSync” in the state attribute.
+*	Users updated will be stamped “SyncApp” in the state attribute.
 *	Users whose RetirementDate has passed are removed from the configured license groups, and disabled when disableUsers is true.
 *	Logs are written to Sync_Log table.
 
@@ -41,17 +41,17 @@ foreach($permission in $permissions){
 4. Connect to the SQL server using the AAD admin and give permissions to the VM, the user name must match the VM name (also available in GivePermissions.sql)
 
 ```sql
-CREATE USER clicksrv FROM EXTERNAL PROVIDER
-ALTER ROLE db_datareader ADD MEMBER clicksrv
-ALTER ROLE db_datawriter ADD MEMBER clicksrv
+CREATE USER [<your-vm-name>] FROM EXTERNAL PROVIDER
+ALTER ROLE db_datareader ADD MEMBER [<your-vm-name>]
+ALTER ROLE db_datawriter ADD MEMBER [<your-vm-name>]
 
 ```
 
 ## Application Configuration
 
-### Configuration filename: *ClickSync.runtimeconfig.json*
+### Configuration filename: *SyncApp.runtimeconfig.json*
 
-The values are set in SyncApp/runtimeconfig.template.json before building (the build generates ClickSync.runtimeconfig.json from it). The keys are case sensitive, and an environment variable with the same name overrides the value from the file.
+The values are set in SyncApp/runtimeconfig.template.json before building (the build generates SyncApp.runtimeconfig.json from it). The keys are case sensitive, and an environment variable with the same name overrides the value from the file.
 
 - `userPrincipalNameSuffix (string)` Required. The suffix added to the TZ column to build the userPrincipalName of the user to update, this suffix must be a verified domain in the tenant.
 
@@ -90,10 +90,10 @@ CREATE TABLE [dbo].[Pratim_pp](
 	[FirstName] [nvarchar](100) NULL,
 	[LastName] [nvarchar](100) NULL,
 	[MobilePhone] [nvarchar](50) NULL,
-	[ClickObjectID] [nvarchar](50) NULL,
+	[AADObjectID] [nvarchar](50) NULL,
 	[RetirementDate] [datetime] NULL,
 	[isActive] [bit] NULL,
-	[ClickSynced] [bit] NOT NULL DEFAULT 0,
+	[Synced] [bit] NOT NULL DEFAULT 0,
 	[SyncErrorCount] [int] NOT NULL DEFAULT 0,
 	[RetirementProcessed] [bit] NOT NULL DEFAULT 0,
 	[RowVer] [rowversion] NOT NULL,
@@ -107,8 +107,8 @@ GO
 ```
 
 - `TZ` The employee id, used with userPrincipalNameSuffix to build the userPrincipalName.
-- `ClickObjectID` The AAD object id of the user, rows without it are skipped.
-- `ClickSynced` Set to 1 by the application after a successful update. The HR feed should set it back to 0 (together with SyncErrorCount) when a row changes.
+- `AADObjectID` The AAD object id of the user, rows without it are skipped.
+- `Synced` Set to 1 by the application after a successful update. The HR feed should set it back to 0 (together with SyncErrorCount) when a row changes.
 - `RetirementDate` When the date has passed the user is removed from the license groups (and disabled when disableUsers is true) instead of being updated.
 - `RetirementProcessed` Set to 1 by the application after the retirement was handled, and back to 0 when the user is updated again. The HR feed should also set it back to 0 when it changes RetirementDate (a rehired user that retires again).
 - `SyncErrorCount` Incremented when handling a row fails. User updates are skipped after maxSyncRetries failures (a warning with the skipped count is logged and mailed), retirements keep being retried every run. Reset to 0 on success, reset it manually to retry a skipped row.
@@ -117,7 +117,7 @@ GO
 For an existing HR table only the sync columns need to be added. Mark all the past retirements as processed, otherwise they will all be picked up again (and disabled) on the first run:
 
 ```sql
-ALTER TABLE [dbo].[Pratim_pp] ADD [SyncErrorCount] [int] NOT NULL DEFAULT 0, [RetirementProcessed] [bit] NOT NULL DEFAULT 0, [RowVer] [rowversion] NOT NULL
+ALTER TABLE [dbo].[Pratim_pp] ADD [AADObjectID] [nvarchar](50) NULL, [Synced] [bit] NOT NULL DEFAULT 0, [SyncErrorCount] [int] NOT NULL DEFAULT 0, [RetirementProcessed] [bit] NOT NULL DEFAULT 0, [RowVer] [rowversion] NOT NULL
 GO
 UPDATE [dbo].[Pratim_pp] SET RetirementProcessed=1 WHERE RetirementDate <= GETDATE()
 GO
@@ -151,14 +151,14 @@ GO
 The application targets .NET 10. To build, edit SyncApp/runtimeconfig.template.json with your values and run:
 
 ```
-dotnet publish SyncApp/ClickSync.csproj -c Release
+dotnet publish SyncApp/SyncApp.csproj -c Release
 ```
 
-Copy the publish output to the VM configured with the managed identity and schedule ClickSync.exe with Task Scheduler at the desired interval. Each run processes the pending rows once and exits (exit code 0 when clean, 1 when there were errors).
+Copy the publish output to the VM configured with the managed identity and schedule SyncApp.exe with Task Scheduler at the desired interval. Each run processes the pending rows once and exits (exit code 0 when clean, 1 when there were errors).
 
 ## Troubleshooting
 
-To get the roles the application gets from Microsoft Graph run ClickSync.exe *printRoles*.
+To get the roles the application gets from Microsoft Graph run SyncApp.exe *printRoles*.
 You should see the following roles:
 
 *User.ReadWrite.All*

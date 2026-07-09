@@ -9,7 +9,7 @@ using Microsoft.Graph.Users.Item.SendMail;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 
-namespace ClickSync
+namespace SyncApp
 {
     class GraphHelper{
         public static GraphServiceClient GetGraphApiClient()
@@ -17,48 +17,48 @@ namespace ClickSync
             return new GraphServiceClient(Program.credential, new[] { "https://graph.microsoft.com/.default" });
         }
 
-        public static async Task<bool> UpdateUserInGraph(ClickUser clickUser, DBHelper db)
+        public static async Task<bool> UpdateUserInGraph(SyncUser syncUser, DBHelper db)
         {
             User user = new User();
-            if(!string.IsNullOrEmpty(clickUser.firstName))
-                user.GivenName = clickUser.firstName;
-            if(!string.IsNullOrEmpty(clickUser.lastName))
-                user.Surname = clickUser.lastName;
-            if(!string.IsNullOrEmpty(clickUser.mobilePhone))
-                user.MobilePhone = clickUser.mobilePhone;
-            string displayName = $"{clickUser.firstName} {clickUser.lastName}".Trim();
+            if(!string.IsNullOrEmpty(syncUser.firstName))
+                user.GivenName = syncUser.firstName;
+            if(!string.IsNullOrEmpty(syncUser.lastName))
+                user.Surname = syncUser.lastName;
+            if(!string.IsNullOrEmpty(syncUser.mobilePhone))
+                user.MobilePhone = syncUser.mobilePhone;
+            string displayName = $"{syncUser.firstName} {syncUser.lastName}".Trim();
             if(displayName != "")
                 user.DisplayName = displayName;
-            user.State = "ClickSync";
+            user.State = "SyncApp";
 
-            if(Program.disableUsers && clickUser.isActive != null)
-                user.AccountEnabled = clickUser.isActive;
+            if(Program.disableUsers && syncUser.isActive != null)
+                user.AccountEnabled = syncUser.isActive;
 
             try
             {
-                Program.WriteLog("d",$"updating user {clickUser.upn}");
-                await Program.graphServiceClient.Users[clickUser.upn].PatchAsync(user);
-                Program.WriteLog("d",$"updated user {clickUser.upn}");
+                Program.WriteLog("d",$"updating user {syncUser.upn}");
+                await Program.graphServiceClient.Users[syncUser.upn].PatchAsync(user);
+                Program.WriteLog("d",$"updated user {syncUser.upn}");
                 Program.usersUpdated++;
                 return true;
             }
             catch (Exception ex)
             {
                 Program.errors++;
-                string str = $"error updating user {clickUser.upn} Error: {ex.Message}";
+                string str = $"error updating user {syncUser.upn} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
                 return false;
             }
         }
 
-        public static async Task<List<string>> CheckUserGroupsInGraph(List<string> groupIds, ClickUser clickUser, DBHelper db){
+        public static async Task<List<string>> CheckUserGroupsInGraph(List<string> groupIds, SyncUser syncUser, DBHelper db){
             try
             {
                 var memberships = new List<string>();
                 for(int i = 0; i < groupIds.Count; i += 20){
                     var chunk = groupIds.Skip(i).Take(20).ToList();
-                    var result = await Program.graphServiceClient.Users[clickUser.clickObjectID]
+                    var result = await Program.graphServiceClient.Users[syncUser.aadObjectID]
                         .CheckMemberGroups
                         .PostAsCheckMemberGroupsPostResponseAsync(new CheckMemberGroupsPostRequestBody { GroupIds = chunk });
                     if (result != null && result.Value != null)
@@ -69,39 +69,39 @@ namespace ClickSync
             catch (System.Exception ex)
             {
                 Program.errors++;
-                string str = $"error checking user {clickUser.upn} groups Error: {ex.Message}";
+                string str = $"error checking user {syncUser.upn} groups Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
                 return null;
             }
         }
 
-        public static async Task<bool> RemoveUserFromGroupInGraph(ClickUser clickUser, string groupID, DBHelper db){
+        public static async Task<bool> RemoveUserFromGroupInGraph(SyncUser syncUser, string groupID, DBHelper db){
             try{
-                Program.WriteLog("d",$"removing user {clickUser.upn} from group {groupID}");
-                await Program.graphServiceClient.Groups[groupID].Members[clickUser.clickObjectID].Ref.DeleteAsync();
-                Program.WriteLog("d",$"removed user {clickUser.upn} from group {groupID}");
+                Program.WriteLog("d",$"removing user {syncUser.upn} from group {groupID}");
+                await Program.graphServiceClient.Groups[groupID].Members[syncUser.aadObjectID].Ref.DeleteAsync();
+                Program.WriteLog("d",$"removed user {syncUser.upn} from group {groupID}");
                 return true;
             }catch(Exception ex){
                 Program.errors++;
-                string str = $"error removing user {clickUser.upn} from group {groupID} Error: {ex.Message}";
+                string str = $"error removing user {syncUser.upn} from group {groupID} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
                 return false;
             }
         }
 
-        public static async Task<bool> DisableUserInGraph(ClickUser clickUser, DBHelper db){
+        public static async Task<bool> DisableUserInGraph(SyncUser syncUser, DBHelper db){
             try{
-                Program.WriteLog("d",$"disabling user {clickUser.upn}");
+                Program.WriteLog("d",$"disabling user {syncUser.upn}");
                 User user = new User();
                 user.AccountEnabled = false;
-                await Program.graphServiceClient.Users[clickUser.clickObjectID].PatchAsync(user);
-                Program.WriteLog("d",$"disabled user {clickUser.upn}");
+                await Program.graphServiceClient.Users[syncUser.aadObjectID].PatchAsync(user);
+                Program.WriteLog("d",$"disabled user {syncUser.upn}");
                 return true;
             }catch(Exception ex){
                 Program.errors++;
-                string str = $"error disabling user {clickUser.upn} Error: {ex.Message}";
+                string str = $"error disabling user {syncUser.upn} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
                 return false;
