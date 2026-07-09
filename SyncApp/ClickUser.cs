@@ -8,8 +8,8 @@ namespace ClickSync
         public string firstName { get; set; }
         public string lastName { get; set; }
         public string mobilePhone { get; set; }
-        public DateTime retirementDate {get; set; } 
-        public bool isActive {get;set;}
+        public DateTime retirementDate {get; set; }
+        public bool? isActive {get;set;}
         public bool clickSynced {get;set;}
         public string clickObjectID { get; set; }
 

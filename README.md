@@ -73,7 +73,7 @@ The values are set in SyncApp/runtimeconfig.template.json before building (the b
 
 - `maxChanges (integer)` The maximum number of pending user changes allowed. If the count is equal to or greater than this value, an error is issued and no users are updated. Default 500.
 
-- `licenseGroups (string)` Required. Comma separated string of AAD group object id's, retired users will be removed from those groups (make sure there are no spaces in the string).
+- `licenseGroups (string)` Required. Comma separated string of AAD group object id's, retired users will be removed from those groups.
 
 ### The application reads the users from a Pratim_pp table in the same database:
 ```sql
@@ -136,7 +136,7 @@ The application targets .NET 10. To build, edit SyncApp/runtimeconfig.template.j
 dotnet publish SyncApp/ClickSync.csproj -c Release
 ```
 
-Copy the publish output to the VM configured with the managed identity and schedule ClickSync.exe with Task Scheduler at the desired interval. Each run processes the pending rows once and exits.
+Copy the publish output to the VM configured with the managed identity and schedule ClickSync.exe with Task Scheduler at the desired interval. Each run processes the pending rows once and exits (exit code 0 when clean, 1 when there were errors).
 
 ## Troubleshooting
 

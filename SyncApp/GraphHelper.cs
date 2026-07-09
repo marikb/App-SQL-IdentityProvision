@@ -20,13 +20,18 @@ namespace ClickSync
         public static async Task UpdateUserInGraph(ClickUser clickUser, DBHelper db)
         {
             User user = new User();
-            user.GivenName = clickUser.firstName;
-            user.Surname = clickUser.lastName;
-            user.MobilePhone = clickUser.mobilePhone;
-            user.DisplayName = $"{clickUser.firstName} {clickUser.lastName}";
+            if(!string.IsNullOrEmpty(clickUser.firstName))
+                user.GivenName = clickUser.firstName;
+            if(!string.IsNullOrEmpty(clickUser.lastName))
+                user.Surname = clickUser.lastName;
+            if(!string.IsNullOrEmpty(clickUser.mobilePhone))
+                user.MobilePhone = clickUser.mobilePhone;
+            string displayName = $"{clickUser.firstName} {clickUser.lastName}".Trim();
+            if(displayName != "")
+                user.DisplayName = displayName;
             user.State = "ClickSync";
 
-            if(Program.disableUsers)
+            if(Program.disableUsers && clickUser.isActive != null)
                 user.AccountEnabled = clickUser.isActive;
 
             try
@@ -39,7 +44,6 @@ namespace ClickSync
             }
             catch (Exception ex)
             {
-                Program.error = true;
                 Program.errors++;
                 string str = $"error updating user {clickUser.tz}{Program.userPrincipalNameSuffix} Error: {ex.Message}";
                 Program.WriteLog("e", str);
@@ -51,14 +55,19 @@ namespace ClickSync
         public static async Task<List<string>> CheckUserGroupsInGraph(List<string> groupIds, ClickUser clickUser, DBHelper db){
             try
             {
-                var result = await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"]
-                    .CheckMemberGroups
-                    .PostAsCheckMemberGroupsPostResponseAsync(new CheckMemberGroupsPostRequestBody { GroupIds = groupIds });
-                return result.Value.Select(g => g.ToString()).ToList();
+                var memberships = new List<string>();
+                for(int i = 0; i < groupIds.Count; i += 20){
+                    var chunk = groupIds.Skip(i).Take(20).ToList();
+                    var result = await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"]
+                        .CheckMemberGroups
+                        .PostAsCheckMemberGroupsPostResponseAsync(new CheckMemberGroupsPostRequestBody { GroupIds = chunk });
+                    if (result != null && result.Value != null)
+                        memberships.AddRange(result.Value.Select(g => g.ToString()));
+                }
+                return memberships;
             }
             catch (System.Exception ex)
             {
-                Program.error = true;
                 Program.errors++;
                 string str = $"error checking user {clickUser.tz}{Program.userPrincipalNameSuffix} groups Error: {ex.Message}";
                 Program.WriteLog("e", str);
@@ -75,7 +84,7 @@ namespace ClickSync
                 await db.UpdateClickSynced(clickUser.tz);
                 Program.WriteLog("d",$"removed user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
             }catch(Exception ex){
-                Program.error = true;
+                Program.errors++;
                 string str = $"error removing user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
@@ -129,7 +138,10 @@ namespace ClickSync
             var accessToken = await Program.credential.GetTokenAsync(new TokenRequestContext(new[] { "https://graph.microsoft.com/.default" }));
             var handler = new JwtSecurityTokenHandler();
             var token = handler.ReadToken(accessToken.Token) as JwtSecurityToken;
-            Console.WriteLine(token.Payload["roles"]);
+            if (token.Payload.TryGetValue("roles", out var roles))
+                Console.WriteLine(roles);
+            else
+                Console.WriteLine("No roles are assigned to this identity.");
             Environment.Exit(0);
         }
 
