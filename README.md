@@ -1,14 +1,15 @@
 # App-SQL-IdentityProvision
 
-Provision users using a mechanism which will keep the users updated and in sync with the main HR DB. The users will be provisioned as cloud identities and updated regularly with this custom mechanism. 
+Keep cloud users updated and in sync with the main HR DB. The users are matched by userPrincipalName (the TZ column plus a configurable suffix) and updated regularly with this custom mechanism.
 
-## Syncronization process
-![Syncronization process](docs/sync-process.jpg)
+## Synchronization process
+![Synchronization process](docs/sync-process.jpg)
 
 *	Authentication is based on Azure managed identity (passwordless).
-*	User creation/update and mail notifications are based on Microsoft Graph.
+*	User updates and mail notifications are based on Microsoft Graph.
 *	SQL is Azure SQL.
-*	Users created or updated will be stamped “ClickSync” in the state attribute.
+*	Users updated will be stamped “ClickSync” in the state attribute.
+*	Users whose RetirementDate has passed are removed from the configured license groups.
 *	Logs are written to Sync_Log table.
 
 
@@ -53,6 +54,7 @@ New-AzureADServiceAppRoleAssignment -Id $mailSend.Id -ObjectId $msi.ObjectId -Pr
 
 ```powershell
 $vmObjectId = "<your-vm-managed-identity-object-id>"
+Connect-AzureAD
 $graph = Get-AzureADServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
 $permissions = @("GroupMember.ReadWrite.All", "Group.ReadWrite.All", "Directory.ReadWrite.All")
 $msi = Get-AzureADServicePrincipal -ObjectId $vmObjectId
@@ -80,27 +82,62 @@ ALTER ROLE db_datawriter ADD MEMBER clicksrv
 
 ### Configuration filename: *ClickSync.runtimeconfig.json*
 
-- `userPrincipalNameSuffix (string)` The suffix of the userPrincipalName to use when creating users, this suffix must be a verified domain in the tenant.
+The keys are case sensitive, and an environment variable with the same name overrides the value from the file.
 
-- `sqldb_connection (string)` SQL connection string (example: "Data Source=xx.database.windows.net; Initial Catalog=yy;")
+- `userPrincipalNameSuffix (string)` Required. The suffix added to the TZ column to build the userPrincipalName of the user to update, this suffix must be a verified domain in the tenant.
 
-- `rowsPerCycle (integer)` How many rows to read at once (effects memory consumption)
+- `sqldb_connection (string)` Required. SQL connection string (example: "Data Source=xx.database.windows.net; Initial Catalog=yy;")
 
-- `sendMailNotification (boolean)` Whether to send mail notifications.
+- `rowsPerCycle (integer)` How many rows to read at once (affects memory consumption). Default 100.
 
-- `mailNotificationTo (string)` Email address to send the notifications to.
+- `sendMailNotification (boolean)` Whether to send mail notifications. Default false.
 
-- `mailNotificationFrom (string)` Email to send the notifications from, must be member of the tenant and give permissions to the MSI to send emails. (Mail.Send)
+- `mailNotificationTo (string)` Email address to send the notifications to. Required when sendMailNotification is true.
 
-- `Debug (boolean)` Get more verbose logging in the console.
+- `mailNotificationFrom (string)` Email to send the notifications from, must be member of the tenant and give permissions to the MSI to send emails. (Mail.Send) Required when sendMailNotification is true.
 
-- `disableUsers (Boolean)` Whether to disable users that isActive column in Pratim_pp table is set to false.
+- `debug (boolean)` Get more verbose logging in the console.
 
-- `maxRetirements (int)` The maximum users to remove out of groups when RetirementDate is today or before today and ClickSynced is 0, if the number of rows in the database exceeds this value an error will be issued and the users will not be removed from groups in AAD.
+- `disableUsers (boolean)` Whether to disable users whose isActive column in the Pratim_pp table is set to false.
 
-- `*licenseGroups (string)` comma separated string of AAD group object id’s, retired users will be removed from those groups (make sure there are no spaces in the string).
+- `maxRetirements (integer)` The maximum number of pending retirements allowed. If the count of rows with RetirementDate today or earlier that were not synced yet is equal to or greater than this value, an error is issued and no users are removed from groups. Default 500.
 
-### The application requires log table in the same database:
+- `maxChanges (integer)` The maximum number of pending user changes allowed. If the count is equal to or greater than this value, an error is issued and no users are updated. Default 500.
+
+- `licenseGroups (string)` Required. Comma separated string of AAD group object id's, retired users will be removed from those groups (make sure there are no spaces in the string).
+
+### The application reads the users from a Pratim_pp table in the same database:
+```sql
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[Pratim_pp](
+	[TZ] [nvarchar](50) NOT NULL,
+	[FirstName] [nvarchar](100) NULL,
+	[LastName] [nvarchar](100) NULL,
+	[MobilePhone] [nvarchar](50) NULL,
+	[ClickObjectID] [nvarchar](50) NULL,
+	[RetirementDate] [datetime] NULL,
+	[isActive] [bit] NULL,
+	[ClickSynced] [bit] NOT NULL DEFAULT 0,
+ CONSTRAINT [PK_Pratim_pp] PRIMARY KEY CLUSTERED 
+(
+	[TZ] ASC
+) WITH (STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+```
+
+- `TZ` The employee id, used with userPrincipalNameSuffix to build the userPrincipalName.
+- `ClickObjectID` The AAD object id of the user, rows without it are skipped.
+- `ClickSynced` Set to 1 by the application after the row was handled. The HR feed should set it back to 0 when a row changes.
+- `RetirementDate` When the date has passed the user is removed from the license groups instead of being updated.
+
+### The application requires a log table in the same database:
 ```sql
 SET ANSI_NULLS ON
 GO
@@ -143,3 +180,6 @@ Performance testing to provide some benchmark results:
 * 1000 user updates – about 2 min
 * 500 users removed from 2 groups – about 170 seconds
 
+## License
+
+MIT, see the LICENSE file.

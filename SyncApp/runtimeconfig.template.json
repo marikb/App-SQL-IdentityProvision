@@ -1,15 +1,15 @@
 {
   "configProperties": {
-    "userPrincipalNameSuffix": "@example.com",
-    "sqldb_connection": "Data Source=<redacted-sql-host>; Initial Catalog=<redacted-db>;",
+    "userPrincipalNameSuffix": "@yourdomain.com",
+    "sqldb_connection": "Data Source=<your-sql-server>.database.windows.net; Initial Catalog=<your-database>;",
     "rowsPerCycle": 500,
     "sendMailNotification": true,
-    "mailNotificationTo": "<redacted-email>",
-    "mailNotificationFrom": "<redacted-email>",
+    "mailNotificationTo": "<notification-mailbox>@yourdomain.com",
+    "mailNotificationFrom": "<sender-mailbox>@yourdomain.com",
     "debug": true,
     "disableUsers": true,
     "maxRetirements": 500,
     "maxChanges": 500,
-    "licenseGroups": "<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>,<redacted-guid>"
+    "licenseGroups": "<group-object-id-1>,<group-object-id-2>"
   }
 }
