@@ -1,3 +1,3 @@
-CREATE USER clicksrv FROM EXTERNAL PROVIDER
-ALTER ROLE db_datareader ADD MEMBER clicksrv
-ALTER ROLE db_datawriter ADD MEMBER clicksrv
+CREATE USER [<your-vm-name>] FROM EXTERNAL PROVIDER
+ALTER ROLE db_datareader ADD MEMBER [<your-vm-name>]
+ALTER ROLE db_datawriter ADD MEMBER [<your-vm-name>]

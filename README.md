@@ -8,7 +8,7 @@ Keep cloud users updated and in sync with the main HR DB. The users are matched 
 *	Authentication is based on Azure managed identity (passwordless).
 *	User updates and mail notifications are based on Microsoft Graph.
 *	SQL is Azure SQL.
-*	Users updated will be stamped “ClickSync” in the state attribute.
+*	Users updated will be stamped “SyncApp” in the state attribute.
 *	Users whose RetirementDate has passed are removed from the configured license groups.
 *	Logs are written to Sync_Log table.
 
@@ -41,17 +41,17 @@ foreach($permission in $permissions){
 4. Connect to the SQL server using the AAD admin and give permissions to the VM, the user name must match the VM name (also available in GivePermissions.sql)
 
 ```sql
-CREATE USER clicksrv FROM EXTERNAL PROVIDER
-ALTER ROLE db_datareader ADD MEMBER clicksrv
-ALTER ROLE db_datawriter ADD MEMBER clicksrv
+CREATE USER [<your-vm-name>] FROM EXTERNAL PROVIDER
+ALTER ROLE db_datareader ADD MEMBER [<your-vm-name>]
+ALTER ROLE db_datawriter ADD MEMBER [<your-vm-name>]
 
 ```
 
 ## Application Configuration
 
-### Configuration filename: *ClickSync.runtimeconfig.json*
+### Configuration filename: *SyncApp.runtimeconfig.json*
 
-The values are set in SyncApp/runtimeconfig.template.json before building (the build generates ClickSync.runtimeconfig.json from it). The keys are case sensitive, and an environment variable with the same name overrides the value from the file.
+The values are set in SyncApp/runtimeconfig.template.json before building (the build generates SyncApp.runtimeconfig.json from it). The keys are case sensitive, and an environment variable with the same name overrides the value from the file.
 
 - `userPrincipalNameSuffix (string)` Required. The suffix added to the TZ column to build the userPrincipalName of the user to update, this suffix must be a verified domain in the tenant.
 
@@ -73,7 +73,7 @@ The values are set in SyncApp/runtimeconfig.template.json before building (the b
 
 - `maxChanges (integer)` The maximum number of pending user changes allowed. If the count is equal to or greater than this value, an error is issued and no users are updated. Default 500.
 
-- `licenseGroups (string)` Required. Comma separated string of AAD group object id's, retired users will be removed from those groups (make sure there are no spaces in the string).
+- `licenseGroups (string)` Required. Comma separated string of AAD group object id's, retired users will be removed from those groups.
 
 ### The application reads the users from a Pratim_pp table in the same database:
 ```sql
@@ -88,10 +88,10 @@ CREATE TABLE [dbo].[Pratim_pp](
 	[FirstName] [nvarchar](100) NULL,
 	[LastName] [nvarchar](100) NULL,
 	[MobilePhone] [nvarchar](50) NULL,
-	[ClickObjectID] [nvarchar](50) NULL,
+	[AADObjectID] [nvarchar](50) NULL,
 	[RetirementDate] [datetime] NULL,
 	[isActive] [bit] NULL,
-	[ClickSynced] [bit] NOT NULL DEFAULT 0,
+	[Synced] [bit] NOT NULL DEFAULT 0,
  CONSTRAINT [PK_Pratim_pp] PRIMARY KEY CLUSTERED 
 (
 	[TZ] ASC
@@ -102,8 +102,8 @@ GO
 ```
 
 - `TZ` The employee id, used with userPrincipalNameSuffix to build the userPrincipalName.
-- `ClickObjectID` The AAD object id of the user, rows without it are skipped.
-- `ClickSynced` Set to 1 by the application after the row was handled. The HR feed should set it back to 0 when a row changes.
+- `AADObjectID` The AAD object id of the user, rows without it are skipped.
+- `Synced` Set to 1 by the application after the row was handled. The HR feed should set it back to 0 when a row changes.
 - `RetirementDate` When the date has passed the user is removed from the license groups instead of being updated.
 
 ### The application requires a log table in the same database:
@@ -133,14 +133,14 @@ GO
 The application targets .NET 10. To build, edit SyncApp/runtimeconfig.template.json with your values and run:
 
 ```
-dotnet publish SyncApp/ClickSync.csproj -c Release
+dotnet publish SyncApp/SyncApp.csproj -c Release
 ```
 
-Copy the publish output to the VM configured with the managed identity and schedule ClickSync.exe with Task Scheduler at the desired interval. Each run processes the pending rows once and exits.
+Copy the publish output to the VM configured with the managed identity and schedule SyncApp.exe with Task Scheduler at the desired interval. Each run processes the pending rows once and exits (exit code 0 when clean, 1 when there were errors).
 
 ## Troubleshooting
 
-To get the roles the application gets from Microsoft Graph run ClickSync.exe *printRoles*.
+To get the roles the application gets from Microsoft Graph run SyncApp.exe *printRoles*.
 You should see the following roles:
 
 *User.ReadWrite.All*

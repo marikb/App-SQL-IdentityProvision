@@ -5,7 +5,7 @@ using Azure.Identity;
 using Microsoft.Graph;
 using System.Linq;
 
-namespace ClickSync
+namespace SyncApp
 {
     class Program
     {
@@ -14,12 +14,10 @@ namespace ClickSync
         public static string userPrincipalNameSuffix;
         public static bool disableUsers = false;
         public static bool debug = false;
-        public static bool error = false;
         public static int usersUpdated = 0;
-        public static int usersCreated = 0;
         public static int errors = 0;
 
-        static async Task Main(string[] args)
+        static async Task<int> Main(string[] args)
         {
             if(args.Length > 0 && args[0].ToLower() == "printroles")
                 await GraphHelper.PrintRoles();
@@ -36,6 +34,9 @@ namespace ClickSync
 
             string strDisableUsers = GetValue("disableUsers");
             bool.TryParse(strDisableUsers, out disableUsers);
+
+            bool sendMailNotification;
+            bool.TryParse(GetValue("sendMailNotification"), out sendMailNotification);
 
             int rowsPerCycle;
             bool parsed = int.TryParse(strRowsPerCycle, out rowsPerCycle);
@@ -55,10 +56,30 @@ namespace ClickSync
                 maxChanges = 500;
 
             string strLicenseGroups = GetValue("licenseGroups");
-            var licenseGroups = strLicenseGroups.Split(',').ToList();
             #endregion
 
             graphServiceClient = GraphHelper.GetGraphApiClient();
+
+            var licenseGroups = new List<string>();
+            if(!string.IsNullOrEmpty(strLicenseGroups))
+                licenseGroups = strLicenseGroups.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+            string missingValues = "";
+            if(string.IsNullOrEmpty(sqlConnString))
+                missingValues += " sqldb_connection";
+            if(string.IsNullOrEmpty(userPrincipalNameSuffix))
+                missingValues += " userPrincipalNameSuffix";
+            if(licenseGroups.Count == 0)
+                missingValues += " licenseGroups";
+            if(sendMailNotification && string.IsNullOrEmpty(GetValue("mailNotificationTo")))
+                missingValues += " mailNotificationTo";
+            if(sendMailNotification && string.IsNullOrEmpty(GetValue("mailNotificationFrom")))
+                missingValues += " mailNotificationFrom";
+            if(missingValues != ""){
+                WriteLog("e",$"Missing required configuration values:{missingValues}");
+                await GraphHelper.SendMail($"Missing required configuration values:{missingValues}", "There was an error in the synchronization process");
+                return 1;
+            }
 
             DBHelper db = new DBHelper(sqlConnString);
             await db.Connect();
@@ -66,68 +87,65 @@ namespace ClickSync
 
 
             var numberOfRetirements = await db.GetNumberOfRetirementsFromDB();
-            bool allowGroupRemoval = numberOfRetirements < maxRetirements ? true : false;
-
-            if(allowGroupRemoval){
+            if(numberOfRetirements < maxRetirements){
                 await HandleGroupRemoval(db,rowsPerCycle,licenseGroups);
                 db.WriteLog("INFORMATION", $"Group removal process finished in {watch.ElapsedMilliseconds * 0.001} seconds.");
             }else{
-                error = true;
-                Program.errors++;
-                db.WriteLog("ERROR", $"There are {numberOfRetirements} retirements which is over the allowed number ({maxRetirements}).");
+                errors++;
+                db.WriteLog("ERROR", $"There are {numberOfRetirements} retirements which is at or over the allowed number ({maxRetirements}).");
             }
 
             var numberOfChanges = await db.GetNumberOfChangesFromDB();
             if(numberOfChanges < maxChanges)
                 await HandleUserUpdates(db,rowsPerCycle);
             else{
-                error = true;
-                Program.errors++;
-                db.WriteLog("ERROR", $"There are {numberOfChanges} changes which is over the allowed number ({maxChanges}).");
+                errors++;
+                db.WriteLog("ERROR", $"There are {numberOfChanges} changes which is at or over the allowed number ({maxChanges}).");
             }
 
 
             watch.Stop();
             string message, subject;
-            if(error){
-                subject = "Click synchronization finished with errors";
+            if(errors > 0){
+                subject = "Synchronization finished with errors";
                 message = $"Synchronization finished with errors please check the log table,\n" +
-                $"Created {usersCreated} users, updated {usersUpdated} in {watch.ElapsedMilliseconds * 0.001} seconds.\n" +
+                $"Updated {usersUpdated} users in {watch.ElapsedMilliseconds * 0.001} seconds.\n" +
                 $"Errors: {errors}";
             }else{
-                subject = "Click synchronization finished";
+                subject = "Synchronization finished";
                 message = $"Synchronization finished,\n" +
-                $"Created {usersCreated} users, updated {usersUpdated} in {watch.ElapsedMilliseconds * 0.001} seconds.";
+                $"Updated {usersUpdated} users in {watch.ElapsedMilliseconds * 0.001} seconds.";
             }
             db.WriteLog("INFORMATION", message);
             db.Disconnect();
             WriteLog("i",message);
             await GraphHelper.SendMail(message, subject);
+            return errors > 0 ? 1 : 0;
         }
 
         public static async Task HandleUserUpdates(DBHelper db, int rowsPerCycle){
-            List<ClickUser> clickUsers = new List<ClickUser>();
+            List<SyncUser> syncUsers = new List<SyncUser>();
             while (true)
             {
-                clickUsers = await db.GetUsersFromDB(rowsPerCycle);
-                if (clickUsers.Count == 0)
+                syncUsers = await db.GetUsersFromDB(rowsPerCycle);
+                if (syncUsers.Count == 0)
                     break;
-                foreach (ClickUser clickUser in clickUsers)
-                    await GraphHelper.UpdateUserInGraph(clickUser, db);
+                foreach (SyncUser syncUser in syncUsers)
+                    await GraphHelper.UpdateUserInGraph(syncUser, db);
             }
         }
 
         public static async Task HandleGroupRemoval(DBHelper db, int rowsPerCycle, List<string> licenseGroups){
-            List<ClickUser> clickUsers = new List<ClickUser>();
+            List<SyncUser> syncUsers = new List<SyncUser>();
             while(true){
-                clickUsers = await db.GetRetirementsFromDB(rowsPerCycle);
-                if (clickUsers.Count == 0)
+                syncUsers = await db.GetRetirementsFromDB(rowsPerCycle);
+                if (syncUsers.Count == 0)
                     break;
 
-                foreach (ClickUser clickUser in clickUsers){
-                    var groups2Remove = await GraphHelper.CheckUserGroupsInGraph(licenseGroups,clickUser, db);
+                foreach (SyncUser syncUser in syncUsers){
+                    var groups2Remove = await GraphHelper.CheckUserGroupsInGraph(licenseGroups,syncUser, db);
                     foreach(var group in groups2Remove)
-                        await GraphHelper.RemoveUserFromGroupInGraph(clickUser,group,db);
+                        await GraphHelper.RemoveUserFromGroupInGraph(syncUser,group,db);
                 }
             }
         }
