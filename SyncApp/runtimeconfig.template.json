@@ -10,6 +10,7 @@
     "disableUsers": true,
     "maxRetirements": 500,
     "maxChanges": 500,
+    "maxSyncRetries": 3,
     "licenseGroups": "<group-object-id-1>,<group-object-id-2>"
   }
 }

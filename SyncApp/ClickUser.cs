@@ -12,6 +12,8 @@ namespace ClickSync
         public bool? isActive {get;set;}
         public bool clickSynced {get;set;}
         public string clickObjectID { get; set; }
+        public byte[] rowVer { get; set; }
+        public string upn { get { return $"{tz}{Program.userPrincipalNameSuffix}"; } }
 
         public ClickUser(SqlDataReader reader)
         {
@@ -20,6 +22,7 @@ namespace ClickSync
             this.lastName = reader["LastName"].ToString();
             this.mobilePhone = reader["MobilePhone"].ToString();
             this.clickObjectID = reader["ClickObjectID"].ToString();
+            this.rowVer = (byte[])reader["RowVer"];
 
             int colIndex = reader.GetOrdinal("RetirementDate");
             if(!reader.IsDBNull(colIndex))

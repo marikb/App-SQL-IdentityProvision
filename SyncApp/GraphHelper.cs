@@ -17,7 +17,7 @@ namespace ClickSync
             return new GraphServiceClient(Program.credential, new[] { "https://graph.microsoft.com/.default" });
         }
 
-        public static async Task UpdateUserInGraph(ClickUser clickUser, DBHelper db)
+        public static async Task<bool> UpdateUserInGraph(ClickUser clickUser, DBHelper db)
         {
             User user = new User();
             if(!string.IsNullOrEmpty(clickUser.firstName))
@@ -36,19 +36,19 @@ namespace ClickSync
 
             try
             {
-                Program.WriteLog("d",$"updating user {clickUser.tz}{Program.userPrincipalNameSuffix}");
-                await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"].PatchAsync(user);
-                await db.UpdateClickSynced(clickUser.tz);
-                Program.WriteLog("d",$"updated user {clickUser.tz}{Program.userPrincipalNameSuffix}");
+                Program.WriteLog("d",$"updating user {clickUser.upn}");
+                await Program.graphServiceClient.Users[clickUser.upn].PatchAsync(user);
+                Program.WriteLog("d",$"updated user {clickUser.upn}");
                 Program.usersUpdated++;
+                return true;
             }
             catch (Exception ex)
             {
                 Program.errors++;
-                string str = $"error updating user {clickUser.tz}{Program.userPrincipalNameSuffix} Error: {ex.Message}";
+                string str = $"error updating user {clickUser.upn} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.UpdateClickSynced(clickUser.tz);
+                return false;
             }
         }
 
@@ -58,7 +58,7 @@ namespace ClickSync
                 var memberships = new List<string>();
                 for(int i = 0; i < groupIds.Count; i += 20){
                     var chunk = groupIds.Skip(i).Take(20).ToList();
-                    var result = await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"]
+                    var result = await Program.graphServiceClient.Users[clickUser.clickObjectID]
                         .CheckMemberGroups
                         .PostAsCheckMemberGroupsPostResponseAsync(new CheckMemberGroupsPostRequestBody { GroupIds = chunk });
                     if (result != null && result.Value != null)
@@ -69,26 +69,42 @@ namespace ClickSync
             catch (System.Exception ex)
             {
                 Program.errors++;
-                string str = $"error checking user {clickUser.tz}{Program.userPrincipalNameSuffix} groups Error: {ex.Message}";
+                string str = $"error checking user {clickUser.upn} groups Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.UpdateClickSynced(clickUser.tz);
-                return new List<string>();
+                return null;
             }
         }
 
-        public static async Task RemoveUserFromGroupInGraph(ClickUser clickUser, string groupID, DBHelper db){
+        public static async Task<bool> RemoveUserFromGroupInGraph(ClickUser clickUser, string groupID, DBHelper db){
             try{
-                Program.WriteLog("d",$"removing user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
+                Program.WriteLog("d",$"removing user {clickUser.upn} from group {groupID}");
                 await Program.graphServiceClient.Groups[groupID].Members[clickUser.clickObjectID].Ref.DeleteAsync();
-                await db.UpdateClickSynced(clickUser.tz);
-                Program.WriteLog("d",$"removed user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
+                Program.WriteLog("d",$"removed user {clickUser.upn} from group {groupID}");
+                return true;
             }catch(Exception ex){
                 Program.errors++;
-                string str = $"error removing user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID} Error: {ex.Message}";
+                string str = $"error removing user {clickUser.upn} from group {groupID} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.UpdateClickSynced(clickUser.tz);
+                return false;
+            }
+        }
+
+        public static async Task<bool> DisableUserInGraph(ClickUser clickUser, DBHelper db){
+            try{
+                Program.WriteLog("d",$"disabling user {clickUser.upn}");
+                User user = new User();
+                user.AccountEnabled = false;
+                await Program.graphServiceClient.Users[clickUser.clickObjectID].PatchAsync(user);
+                Program.WriteLog("d",$"disabled user {clickUser.upn}");
+                return true;
+            }catch(Exception ex){
+                Program.errors++;
+                string str = $"error disabling user {clickUser.upn} Error: {ex.Message}";
+                Program.WriteLog("e", str);
+                db.WriteLog("ERROR", str);
+                return false;
             }
         }
 

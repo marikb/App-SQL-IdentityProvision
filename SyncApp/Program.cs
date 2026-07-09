@@ -15,6 +15,7 @@ namespace ClickSync
         public static bool disableUsers = false;
         public static bool debug = false;
         public static int usersUpdated = 0;
+        public static int retirementsProcessed = 0;
         public static int errors = 0;
 
         static async Task<int> Main(string[] args)
@@ -55,6 +56,12 @@ namespace ClickSync
             if(!parsed)
                 maxChanges = 500;
 
+            string strMaxSyncRetries = GetValue("maxSyncRetries");
+            int maxSyncRetries;
+            parsed = int.TryParse(strMaxSyncRetries, out maxSyncRetries);
+            if(!parsed || maxSyncRetries < 1)
+                maxSyncRetries = 3;
+
             string strLicenseGroups = GetValue("licenseGroups");
             #endregion
 
@@ -81,7 +88,7 @@ namespace ClickSync
                 return 1;
             }
 
-            DBHelper db = new DBHelper(sqlConnString);
+            DBHelper db = new DBHelper(sqlConnString, maxSyncRetries);
             await db.Connect();
             db.WriteLog("INFORMATION", $"Starting synchronization");
 
@@ -103,19 +110,24 @@ namespace ClickSync
                 db.WriteLog("ERROR", $"There are {numberOfChanges} changes which is at or over the allowed number ({maxChanges}).");
             }
 
+            var numberOfSkipped = await db.GetNumberOfSkippedChangesFromDB();
+            if(numberOfSkipped > 0)
+                db.WriteLog("WARNING", $"{numberOfSkipped} users are skipped after failing {maxSyncRetries} times, reset SyncErrorCount to retry them.");
 
             watch.Stop();
             string message, subject;
             if(errors > 0){
                 subject = "Click synchronization finished with errors";
                 message = $"Synchronization finished with errors please check the log table,\n" +
-                $"Updated {usersUpdated} users in {watch.ElapsedMilliseconds * 0.001} seconds.\n" +
+                $"Updated {usersUpdated} users, processed {retirementsProcessed} retirements in {watch.ElapsedMilliseconds * 0.001} seconds.\n" +
                 $"Errors: {errors}";
             }else{
                 subject = "Click synchronization finished";
                 message = $"Synchronization finished,\n" +
-                $"Updated {usersUpdated} users in {watch.ElapsedMilliseconds * 0.001} seconds.";
+                $"Updated {usersUpdated} users, processed {retirementsProcessed} retirements in {watch.ElapsedMilliseconds * 0.001} seconds.";
             }
+            if(numberOfSkipped > 0)
+                message += $"\nSkipped users: {numberOfSkipped} (failed {maxSyncRetries} times, reset SyncErrorCount to retry them)";
             db.WriteLog("INFORMATION", message);
             db.Disconnect();
             WriteLog("i",message);
@@ -124,30 +136,54 @@ namespace ClickSync
         }
 
         public static async Task HandleUserUpdates(DBHelper db, int rowsPerCycle){
-            List<ClickUser> clickUsers = new List<ClickUser>();
+            string lastTZ = "";
             while (true)
             {
-                clickUsers = await db.GetUsersFromDB(rowsPerCycle);
+                var clickUsers = await db.GetUsersFromDB(rowsPerCycle, lastTZ);
                 if (clickUsers.Count == 0)
                     break;
-                foreach (ClickUser clickUser in clickUsers)
-                    await GraphHelper.UpdateUserInGraph(clickUser, db);
+                foreach (ClickUser clickUser in clickUsers){
+                    if (await GraphHelper.UpdateUserInGraph(clickUser, db))
+                        await db.UpdateClickSynced(clickUser.tz, clickUser.rowVer);
+                    else
+                        await db.IncrementSyncErrorCount(clickUser.tz);
+                }
+                lastTZ = clickUsers[clickUsers.Count - 1].tz;
             }
         }
 
         public static async Task HandleGroupRemoval(DBHelper db, int rowsPerCycle, List<string> licenseGroups){
-            List<ClickUser> clickUsers = new List<ClickUser>();
+            string lastTZ = "";
             while(true){
-                clickUsers = await db.GetRetirementsFromDB(rowsPerCycle);
+                var clickUsers = await db.GetRetirementsFromDB(rowsPerCycle, lastTZ);
                 if (clickUsers.Count == 0)
                     break;
 
                 foreach (ClickUser clickUser in clickUsers){
-                    var groups2Remove = await GraphHelper.CheckUserGroupsInGraph(licenseGroups,clickUser, db);
-                    foreach(var group in groups2Remove)
-                        await GraphHelper.RemoveUserFromGroupInGraph(clickUser,group,db);
+                    if (await ProcessRetirementInGraph(clickUser, db, licenseGroups)){
+                        await db.MarkRetirementProcessed(clickUser.tz);
+                        retirementsProcessed++;
+                    }else
+                        await db.IncrementSyncErrorCount(clickUser.tz);
                 }
+                lastTZ = clickUsers[clickUsers.Count - 1].tz;
             }
+        }
+
+        public static async Task<bool> ProcessRetirementInGraph(ClickUser clickUser, DBHelper db, List<string> licenseGroups){
+            if (disableUsers && !await GraphHelper.DisableUserInGraph(clickUser, db))
+                return false;
+
+            var groups2Remove = await GraphHelper.CheckUserGroupsInGraph(licenseGroups, clickUser, db);
+            if (groups2Remove == null)
+                return false;
+
+            bool processed = true;
+            foreach(var group in groups2Remove){
+                if (!await GraphHelper.RemoveUserFromGroupInGraph(clickUser, group, db))
+                    processed = false;
+            }
+            return processed;
         }
 
         public static string GetValue(string valueName){
