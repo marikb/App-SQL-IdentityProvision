@@ -18,58 +18,27 @@ Keep cloud users updated and in sync with the main HR DB. The users are matched 
 
 ![Configure the machine with AAD identity](docs/vm-aad-identity.jpg)
 
-2. Assign permissions to Microsoft Graph to manage users
+2. Assign the Microsoft Graph app roles to the VM identity (requires the Microsoft Graph PowerShell SDK, also available in GiveMicrosoftGraphPermissions.ps1)
 
 ```powershell
 $vmObjectId = "<your-vm-managed-identity-object-id>"
-Connect-AzureAD
-$graph = Get-AzureADServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
-$userReadWriteAllPermission = $graph.AppRoles `
-    | where Value -Like "User.ReadWrite.All" `
-    | Select-Object -First 1
 
-$msi = Get-AzureADServicePrincipal -ObjectId $vmObjectId
+Connect-MgGraph -Scopes "AppRoleAssignment.ReadWrite.All","Application.Read.All"
+$graph = Get-MgServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
+$permissions = @("User.ReadWrite.All", "Mail.Send", "GroupMember.ReadWrite.All", "Group.ReadWrite.All", "Directory.ReadWrite.All")
 
-New-AzureADServiceAppRoleAssignment -Id $userReadWriteAllPermission.Id -ObjectId $msi.ObjectId -PrincipalId $msi.ObjectId -ResourceId $graph.ObjectId  
-
-```
-
-3. Assign permissions to Microsoft Graph to send emails
-
-```powershell
-$vmObjectId = "<your-vm-managed-identity-object-id>"
-Connect-AzureAD
-$graph = Get-AzureADServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
-$mailSend = $graph.AppRoles `
-    | where Value -Like "Mail.Send" `
-    | Select-Object -First 1
-
-$msi = Get-AzureADServicePrincipal -ObjectId $vmObjectId
-
-New-AzureADServiceAppRoleAssignment -Id $mailSend.Id -ObjectId $msi.ObjectId -PrincipalId $msi.ObjectId -ResourceId $graph.ObjectId 
-
-```
-
-4. Assign permissions to Microsoft Graph to manage group membership
-
-```powershell
-$vmObjectId = "<your-vm-managed-identity-object-id>"
-Connect-AzureAD
-$graph = Get-AzureADServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
-$permissions = @("GroupMember.ReadWrite.All", "Group.ReadWrite.All", "Directory.ReadWrite.All")
-$msi = Get-AzureADServicePrincipal -ObjectId $vmObjectId
 foreach($permission in $permissions){
-    $aPermission = $graph.AppRoles | where Value -Like $permission | Select-Object -First 1
-    New-AzureADServiceAppRoleAssignment -Id $aPermission.Id -ObjectId $msi.ObjectId -PrincipalId $msi.ObjectId -ResourceId $graph.ObjectId 
-} 
+    $role = $graph.AppRoles | Where-Object Value -eq $permission
+    New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $vmObjectId -PrincipalId $vmObjectId -ResourceId $graph.Id -AppRoleId $role.Id
+}
 
 ```
 
-5. Configure AAD admin in the SQL server 
+3. Configure AAD admin in the SQL server 
 
 ![Configure AAD admin in the SQL server](docs/sql-overview.jpg)
 
-6. Connect to the SQL server using the AAD admin and give permissions to the VM
+4. Connect to the SQL server using the AAD admin and give permissions to the VM, the user name must match the VM name (also available in GivePermissions.sql)
 
 ```sql
 CREATE USER clicksrv FROM EXTERNAL PROVIDER
@@ -82,7 +51,7 @@ ALTER ROLE db_datawriter ADD MEMBER clicksrv
 
 ### Configuration filename: *ClickSync.runtimeconfig.json*
 
-The keys are case sensitive, and an environment variable with the same name overrides the value from the file.
+The values are set in SyncApp/runtimeconfig.template.json before building (the build generates ClickSync.runtimeconfig.json from it). The keys are case sensitive, and an environment variable with the same name overrides the value from the file.
 
 - `userPrincipalNameSuffix (string)` Required. The suffix added to the TZ column to build the userPrincipalName of the user to update, this suffix must be a verified domain in the tenant.
 
@@ -158,6 +127,17 @@ CREATE TABLE [dbo].[Sync_log](
 GO
 
 ```
+
+## Build and deploy
+
+The application targets .NET 10. To build, edit SyncApp/runtimeconfig.template.json with your values and run:
+
+```
+dotnet publish SyncApp/ClickSync.csproj -c Release
+```
+
+Copy the publish output to the VM configured with the managed identity and schedule ClickSync.exe with Task Scheduler at the desired interval. Each run processes the pending rows once and exits.
+
 ## Troubleshooting
 
 To get the roles the application gets from Microsoft Graph run ClickSync.exe *printRoles*.

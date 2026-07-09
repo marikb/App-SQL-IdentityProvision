@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Microsoft.Azure.Services.AppAuthentication;
+using Azure.Core;
 using System.Threading.Tasks;
-using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 
 namespace ClickSync
 {
@@ -15,12 +15,11 @@ namespace ClickSync
         }
 
         public async Task Connect(){
-            var azureServiceTokenProvider = new AzureServiceTokenProvider();
-            string accessToken = await azureServiceTokenProvider.GetAccessTokenAsync("https://database.windows.net/");
             try
             {
+                var accessToken = await Program.credential.GetTokenAsync(new TokenRequestContext(new[] { "https://database.windows.net/.default" }));
                 this._conn = new SqlConnection(_sqlConnString);
-                _conn.AccessToken = accessToken;
+                _conn.AccessToken = accessToken.Token;
                 _conn.Open();
             }
             catch (Exception ex)
@@ -49,7 +48,7 @@ namespace ClickSync
                 await GraphHelper.SendMail(message, "There was an error in Click synchronization process");
                 Environment.Exit(-1);
                 return 0;
-            } 
+            }
         }
 
         public async Task<int> GetNumberOfChangesFromDB(){
@@ -66,7 +65,7 @@ namespace ClickSync
                 await GraphHelper.SendMail(message, "There was an error in Click synchronization process");
                 Environment.Exit(-1);
                 return 0;
-            } 
+            }
         }
 
         public async Task<List<ClickUser>> GetRetirementsFromDB(int numberOfUsersToGet){
