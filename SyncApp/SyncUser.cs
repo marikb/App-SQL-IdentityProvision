@@ -1,25 +1,25 @@
 using System;
 using Microsoft.Data.SqlClient;
 
-namespace ClickSync
+namespace SyncApp
 {
-    class ClickUser{
+    class SyncUser{
         public string tz { get; set; }
         public string firstName { get; set; }
         public string lastName { get; set; }
         public string mobilePhone { get; set; }
-        public DateTime retirementDate {get; set; } 
-        public bool isActive {get;set;}
-        public bool clickSynced {get;set;}
-        public string clickObjectID { get; set; }
+        public DateTime retirementDate {get; set; }
+        public bool? isActive {get;set;}
+        public bool synced {get;set;}
+        public string aadObjectID { get; set; }
 
-        public ClickUser(SqlDataReader reader)
+        public SyncUser(SqlDataReader reader)
         {
             this.tz = reader["TZ"].ToString();
             this.firstName = reader["FirstName"].ToString();
             this.lastName = reader["LastName"].ToString();
             this.mobilePhone = reader["MobilePhone"].ToString();
-            this.clickObjectID = reader["ClickObjectID"].ToString();
+            this.aadObjectID = reader["AADObjectID"].ToString();
 
             int colIndex = reader.GetOrdinal("RetirementDate");
             if(!reader.IsDBNull(colIndex))
@@ -29,9 +29,9 @@ namespace ClickSync
             if(!reader.IsDBNull(colIndex))
                 this.isActive = reader.GetBoolean(colIndex);
 
-            colIndex = reader.GetOrdinal("ClickSynced");
+            colIndex = reader.GetOrdinal("Synced");
             if(!reader.IsDBNull(colIndex))
-                this.clickSynced = reader.GetBoolean(colIndex);
+                this.synced = reader.GetBoolean(colIndex);
 
         }
     }

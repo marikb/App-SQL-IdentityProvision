@@ -9,7 +9,7 @@ using Microsoft.Graph.Users.Item.SendMail;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 
-namespace ClickSync
+namespace SyncApp
 {
     class GraphHelper{
         public static GraphServiceClient GetGraphApiClient()
@@ -17,69 +17,78 @@ namespace ClickSync
             return new GraphServiceClient(Program.credential, new[] { "https://graph.microsoft.com/.default" });
         }
 
-        public static async Task UpdateUserInGraph(ClickUser clickUser, DBHelper db)
+        public static async Task UpdateUserInGraph(SyncUser syncUser, DBHelper db)
         {
             User user = new User();
-            user.GivenName = clickUser.firstName;
-            user.Surname = clickUser.lastName;
-            user.MobilePhone = clickUser.mobilePhone;
-            user.DisplayName = $"{clickUser.firstName} {clickUser.lastName}";
-            user.State = "ClickSync";
+            if(!string.IsNullOrEmpty(syncUser.firstName))
+                user.GivenName = syncUser.firstName;
+            if(!string.IsNullOrEmpty(syncUser.lastName))
+                user.Surname = syncUser.lastName;
+            if(!string.IsNullOrEmpty(syncUser.mobilePhone))
+                user.MobilePhone = syncUser.mobilePhone;
+            string displayName = $"{syncUser.firstName} {syncUser.lastName}".Trim();
+            if(displayName != "")
+                user.DisplayName = displayName;
+            user.State = "SyncApp";
 
-            if(Program.disableUsers)
-                user.AccountEnabled = clickUser.isActive;
+            if(Program.disableUsers && syncUser.isActive != null)
+                user.AccountEnabled = syncUser.isActive;
 
             try
             {
-                Program.WriteLog("d",$"updating user {clickUser.tz}{Program.userPrincipalNameSuffix}");
-                await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"].PatchAsync(user);
-                await db.UpdateClickSynced(clickUser.tz);
-                Program.WriteLog("d",$"updated user {clickUser.tz}{Program.userPrincipalNameSuffix}");
+                Program.WriteLog("d",$"updating user {syncUser.tz}{Program.userPrincipalNameSuffix}");
+                await Program.graphServiceClient.Users[$"{syncUser.tz}{Program.userPrincipalNameSuffix}"].PatchAsync(user);
+                await db.MarkSynced(syncUser.tz);
+                Program.WriteLog("d",$"updated user {syncUser.tz}{Program.userPrincipalNameSuffix}");
                 Program.usersUpdated++;
             }
             catch (Exception ex)
             {
-                Program.error = true;
                 Program.errors++;
-                string str = $"error updating user {clickUser.tz}{Program.userPrincipalNameSuffix} Error: {ex.Message}";
+                string str = $"error updating user {syncUser.tz}{Program.userPrincipalNameSuffix} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.UpdateClickSynced(clickUser.tz);
+                await db.MarkSynced(syncUser.tz);
             }
         }
 
-        public static async Task<List<string>> CheckUserGroupsInGraph(List<string> groupIds, ClickUser clickUser, DBHelper db){
+        public static async Task<List<string>> CheckUserGroupsInGraph(List<string> groupIds, SyncUser syncUser, DBHelper db){
             try
             {
-                var result = await Program.graphServiceClient.Users[$"{clickUser.tz}{Program.userPrincipalNameSuffix}"]
-                    .CheckMemberGroups
-                    .PostAsCheckMemberGroupsPostResponseAsync(new CheckMemberGroupsPostRequestBody { GroupIds = groupIds });
-                return result.Value.Select(g => g.ToString()).ToList();
+                var memberships = new List<string>();
+                for(int i = 0; i < groupIds.Count; i += 20){
+                    var chunk = groupIds.Skip(i).Take(20).ToList();
+                    var result = await Program.graphServiceClient.Users[$"{syncUser.tz}{Program.userPrincipalNameSuffix}"]
+                        .CheckMemberGroups
+                        .PostAsCheckMemberGroupsPostResponseAsync(new CheckMemberGroupsPostRequestBody { GroupIds = chunk });
+                    if (result != null && result.Value != null)
+                        memberships.AddRange(result.Value.Select(g => g.ToString()));
+                }
+                return memberships;
             }
             catch (System.Exception ex)
             {
-                Program.error = true;
                 Program.errors++;
-                string str = $"error checking user {clickUser.tz}{Program.userPrincipalNameSuffix} groups Error: {ex.Message}";
+                string str = $"error checking user {syncUser.tz}{Program.userPrincipalNameSuffix} groups Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.UpdateClickSynced(clickUser.tz);
+                await db.MarkSynced(syncUser.tz);
                 return new List<string>();
             }
         }
 
-        public static async Task RemoveUserFromGroupInGraph(ClickUser clickUser, string groupID, DBHelper db){
+        public static async Task RemoveUserFromGroupInGraph(SyncUser syncUser, string groupID, DBHelper db){
             try{
-                Program.WriteLog("d",$"removing user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
-                await Program.graphServiceClient.Groups[groupID].Members[clickUser.clickObjectID].Ref.DeleteAsync();
-                await db.UpdateClickSynced(clickUser.tz);
-                Program.WriteLog("d",$"removed user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
+                Program.WriteLog("d",$"removing user {syncUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
+                await Program.graphServiceClient.Groups[groupID].Members[syncUser.aadObjectID].Ref.DeleteAsync();
+                await db.MarkSynced(syncUser.tz);
+                Program.WriteLog("d",$"removed user {syncUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
             }catch(Exception ex){
-                Program.error = true;
-                string str = $"error removing user {clickUser.tz}{Program.userPrincipalNameSuffix} from group {groupID} Error: {ex.Message}";
+                Program.errors++;
+                string str = $"error removing user {syncUser.tz}{Program.userPrincipalNameSuffix} from group {groupID} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.UpdateClickSynced(clickUser.tz);
+                await db.MarkSynced(syncUser.tz);
             }
         }
 
@@ -129,7 +138,10 @@ namespace ClickSync
             var accessToken = await Program.credential.GetTokenAsync(new TokenRequestContext(new[] { "https://graph.microsoft.com/.default" }));
             var handler = new JwtSecurityTokenHandler();
             var token = handler.ReadToken(accessToken.Token) as JwtSecurityToken;
-            Console.WriteLine(token.Payload["roles"]);
+            if (token.Payload.TryGetValue("roles", out var roles))
+                Console.WriteLine(roles);
+            else
+                Console.WriteLine("No roles are assigned to this identity.");
             Environment.Exit(0);
         }
 
