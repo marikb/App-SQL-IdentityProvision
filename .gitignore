@@ -1,29 +1,5 @@
-# Build output
 bin/
 obj/
-*.pdb
-*.dll
-*.exe
-
-# Runtime configs (contain environment-specific secrets)
-*.runtimeconfig.json
-*.runtimeconfig.dev.json
-appsettings*.json
-!appsettings.Example.json
-
-# IDE
-.vscode/
 .vs/
 *.user
-*.suo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# NuGet
-*.nupkg
-packages/
+*.runtimeconfig.json
