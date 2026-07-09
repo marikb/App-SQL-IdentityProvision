@@ -17,7 +17,7 @@ namespace SyncApp
             return new GraphServiceClient(Program.credential, new[] { "https://graph.microsoft.com/.default" });
         }
 
-        public static async Task UpdateUserInGraph(SyncUser syncUser, DBHelper db)
+        public static async Task<bool> UpdateUserInGraph(SyncUser syncUser, DBHelper db)
         {
             User user = new User();
             if(!string.IsNullOrEmpty(syncUser.firstName))
@@ -36,19 +36,19 @@ namespace SyncApp
 
             try
             {
-                Program.WriteLog("d",$"updating user {syncUser.tz}{Program.userPrincipalNameSuffix}");
-                await Program.graphServiceClient.Users[$"{syncUser.tz}{Program.userPrincipalNameSuffix}"].PatchAsync(user);
-                await db.MarkSynced(syncUser.tz);
-                Program.WriteLog("d",$"updated user {syncUser.tz}{Program.userPrincipalNameSuffix}");
+                Program.WriteLog("d",$"updating user {syncUser.upn}");
+                await Program.graphServiceClient.Users[syncUser.upn].PatchAsync(user);
+                Program.WriteLog("d",$"updated user {syncUser.upn}");
                 Program.usersUpdated++;
+                return true;
             }
             catch (Exception ex)
             {
                 Program.errors++;
-                string str = $"error updating user {syncUser.tz}{Program.userPrincipalNameSuffix} Error: {ex.Message}";
+                string str = $"error updating user {syncUser.upn} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.MarkSynced(syncUser.tz);
+                return false;
             }
         }
 
@@ -58,7 +58,7 @@ namespace SyncApp
                 var memberships = new List<string>();
                 for(int i = 0; i < groupIds.Count; i += 20){
                     var chunk = groupIds.Skip(i).Take(20).ToList();
-                    var result = await Program.graphServiceClient.Users[$"{syncUser.tz}{Program.userPrincipalNameSuffix}"]
+                    var result = await Program.graphServiceClient.Users[syncUser.aadObjectID]
                         .CheckMemberGroups
                         .PostAsCheckMemberGroupsPostResponseAsync(new CheckMemberGroupsPostRequestBody { GroupIds = chunk });
                     if (result != null && result.Value != null)
@@ -69,26 +69,42 @@ namespace SyncApp
             catch (System.Exception ex)
             {
                 Program.errors++;
-                string str = $"error checking user {syncUser.tz}{Program.userPrincipalNameSuffix} groups Error: {ex.Message}";
+                string str = $"error checking user {syncUser.upn} groups Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.MarkSynced(syncUser.tz);
-                return new List<string>();
+                return null;
             }
         }
 
-        public static async Task RemoveUserFromGroupInGraph(SyncUser syncUser, string groupID, DBHelper db){
+        public static async Task<bool> RemoveUserFromGroupInGraph(SyncUser syncUser, string groupID, DBHelper db){
             try{
-                Program.WriteLog("d",$"removing user {syncUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
+                Program.WriteLog("d",$"removing user {syncUser.upn} from group {groupID}");
                 await Program.graphServiceClient.Groups[groupID].Members[syncUser.aadObjectID].Ref.DeleteAsync();
-                await db.MarkSynced(syncUser.tz);
-                Program.WriteLog("d",$"removed user {syncUser.tz}{Program.userPrincipalNameSuffix} from group {groupID}");
+                Program.WriteLog("d",$"removed user {syncUser.upn} from group {groupID}");
+                return true;
             }catch(Exception ex){
                 Program.errors++;
-                string str = $"error removing user {syncUser.tz}{Program.userPrincipalNameSuffix} from group {groupID} Error: {ex.Message}";
+                string str = $"error removing user {syncUser.upn} from group {groupID} Error: {ex.Message}";
                 Program.WriteLog("e", str);
                 db.WriteLog("ERROR", str);
-                await db.MarkSynced(syncUser.tz);
+                return false;
+            }
+        }
+
+        public static async Task<bool> DisableUserInGraph(SyncUser syncUser, DBHelper db){
+            try{
+                Program.WriteLog("d",$"disabling user {syncUser.upn}");
+                User user = new User();
+                user.AccountEnabled = false;
+                await Program.graphServiceClient.Users[syncUser.aadObjectID].PatchAsync(user);
+                Program.WriteLog("d",$"disabled user {syncUser.upn}");
+                return true;
+            }catch(Exception ex){
+                Program.errors++;
+                string str = $"error disabling user {syncUser.upn} Error: {ex.Message}";
+                Program.WriteLog("e", str);
+                db.WriteLog("ERROR", str);
+                return false;
             }
         }
 
