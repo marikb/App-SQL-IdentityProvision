@@ -9,9 +9,11 @@ namespace SyncApp
     class DBHelper{
         private string _sqlConnString;
         private SqlConnection _conn;
+        private int _maxSyncRetries;
 
-        public DBHelper(string sqlConnString){
+        public DBHelper(string sqlConnString, int maxSyncRetries){
             this._sqlConnString = sqlConnString;
+            this._maxSyncRetries = maxSyncRetries;
         }
 
         public async Task Connect(){
@@ -37,7 +39,7 @@ namespace SyncApp
         public async Task<int> GetNumberOfRetirementsFromDB(){
             try
             {
-                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND RetirementDate <= GETDATE()";
+                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND RetirementProcessed=0 AND RetirementDate <= GETDATE()";
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 return (int)cmd.ExecuteScalar();
             }
@@ -54,8 +56,9 @@ namespace SyncApp
         public async Task<int> GetNumberOfChangesFromDB(){
             try
             {
-                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL)";
+                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND SyncErrorCount<@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL)";
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
+                cmd.Parameters.AddWithValue("@maxRetries", _maxSyncRetries);
                 return (int)cmd.ExecuteScalar();
              }
             catch (System.Exception ex)
@@ -68,13 +71,32 @@ namespace SyncApp
             }
         }
 
-        public async Task<List<SyncUser>> GetRetirementsFromDB(int numberOfUsersToGet){
+        public async Task<int> GetNumberOfSkippedChangesFromDB(){
             try
             {
-                var sqlCommand = "SELECT TOP (@rows) * FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND RetirementDate <= GETDATE()";
+                var sqlCommand = "SELECT COUNT(*) FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND SyncErrorCount>=@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL)";
+                SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
+                cmd.Parameters.AddWithValue("@maxRetries", _maxSyncRetries);
+                return (int)cmd.ExecuteScalar();
+             }
+            catch (System.Exception ex)
+            {
+                string message = $"Error getting number of skipped users from SQL!\n error: {ex.Message}";
+                Program.WriteLog("e",message);
+                await GraphHelper.SendMail(message, "There was an error in the synchronization process");
+                Environment.Exit(-1);
+                return 0;
+            }
+        }
+
+        public async Task<List<SyncUser>> GetRetirementsFromDB(int numberOfUsersToGet, string afterTZ){
+            try
+            {
+                var sqlCommand = "SELECT TOP (@rows) * FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND RetirementProcessed=0 AND RetirementDate <= GETDATE() AND TZ>@afterTZ ORDER BY TZ";
                 List<SyncUser> syncUsers = new List<SyncUser>();
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 cmd.Parameters.AddWithValue("@rows", numberOfUsersToGet);
+                cmd.Parameters.AddWithValue("@afterTZ", afterTZ);
                 SqlDataReader reader = cmd.ExecuteReader();
                 while (reader.Read())
                     syncUsers.Add(new SyncUser(reader));
@@ -92,14 +114,16 @@ namespace SyncApp
             }
         }
 
-        public async Task<List<SyncUser>> GetUsersFromDB(int numberOfUsersToGet)
+        public async Task<List<SyncUser>> GetUsersFromDB(int numberOfUsersToGet, string afterTZ)
         {
             try
             {
                 List<SyncUser> syncUsers = new List<SyncUser>();
-                var sqlCommand = "SELECT TOP (@rows) * FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL)";
+                var sqlCommand = "SELECT TOP (@rows) * FROM [dbo].[Pratim_pp] WHERE AADObjectID IS NOT NULL AND Synced=0 AND SyncErrorCount<@maxRetries AND (NOT RetirementDate <= GETDATE() OR RetirementDate IS NULL) AND TZ>@afterTZ ORDER BY TZ";
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 cmd.Parameters.AddWithValue("@rows", numberOfUsersToGet);
+                cmd.Parameters.AddWithValue("@maxRetries", _maxSyncRetries);
+                cmd.Parameters.AddWithValue("@afterTZ", afterTZ);
                 SqlDataReader reader = cmd.ExecuteReader();
                 while (reader.Read())
                     syncUsers.Add(new SyncUser(reader));
@@ -116,14 +140,29 @@ namespace SyncApp
             }
         }
 
-        public async Task MarkSynced(string TZ)
+        public async Task MarkSynced(string TZ, byte[] rowVer)
         {
-            var sqlCommand = "UPDATE [dbo].[Pratim_pp] SET Synced=1 WHERE TZ=@tz";
+            await UpdateRow("UPDATE [dbo].[Pratim_pp] SET Synced=1, SyncErrorCount=0, RetirementProcessed=0 WHERE TZ=@tz AND RowVer=@rowVer", TZ, rowVer);
+        }
 
+        public async Task MarkRetirementProcessed(string TZ)
+        {
+            await UpdateRow("UPDATE [dbo].[Pratim_pp] SET RetirementProcessed=1, SyncErrorCount=0 WHERE TZ=@tz", TZ);
+        }
+
+        public async Task IncrementSyncErrorCount(string TZ)
+        {
+            await UpdateRow("UPDATE [dbo].[Pratim_pp] SET SyncErrorCount=SyncErrorCount+1 WHERE TZ=@tz", TZ);
+        }
+
+        private async Task UpdateRow(string sqlCommand, string TZ, byte[] rowVer = null)
+        {
             try
             {
                 SqlCommand cmd = new SqlCommand(sqlCommand, _conn);
                 cmd.Parameters.AddWithValue("@tz", TZ);
+                if (rowVer != null)
+                    cmd.Parameters.AddWithValue("@rowVer", rowVer);
                 cmd.ExecuteNonQuery();
                 cmd.Dispose();
             }

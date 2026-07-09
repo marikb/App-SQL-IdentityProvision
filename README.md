@@ -9,7 +9,7 @@ Keep cloud users updated and in sync with the main HR DB. The users are matched 
 *	User updates and mail notifications are based on Microsoft Graph.
 *	SQL is Azure SQL.
 *	Users updated will be stamped “SyncApp” in the state attribute.
-*	Users whose RetirementDate has passed are removed from the configured license groups.
+*	Users whose RetirementDate has passed are removed from the configured license groups, and disabled when disableUsers is true.
 *	Logs are written to Sync_Log table.
 
 
@@ -25,7 +25,7 @@ $vmObjectId = "<your-vm-managed-identity-object-id>"
 
 Connect-MgGraph -Scopes "AppRoleAssignment.ReadWrite.All","Application.Read.All"
 $graph = Get-MgServicePrincipal -Filter "AppId eq '00000003-0000-0000-c000-000000000000'"
-$permissions = @("User.ReadWrite.All", "Mail.Send", "GroupMember.ReadWrite.All", "Group.ReadWrite.All", "Directory.ReadWrite.All")
+$permissions = @("User.ReadWrite.All", "User.EnableDisableAccount.All", "GroupMember.ReadWrite.All", "Directory.Read.All", "Mail.Send")
 
 foreach($permission in $permissions){
     $role = $graph.AppRoles | Where-Object Value -eq $permission
@@ -67,11 +67,13 @@ The values are set in SyncApp/runtimeconfig.template.json before building (the b
 
 - `debug (boolean)` Get more verbose logging in the console.
 
-- `disableUsers (boolean)` Whether to disable users whose isActive column in the Pratim_pp table is set to false.
+- `disableUsers (boolean)` Whether to sync the isActive column in the Pratim_pp table to the accountEnabled attribute (users with isActive false are disabled, users with isActive true are enabled again). When true, retired users are also disabled when the retirement is processed (turning this on later will not disable retirements that were already processed).
 
-- `maxRetirements (integer)` The maximum number of pending retirements allowed. If the count of rows with RetirementDate today or earlier that were not synced yet is equal to or greater than this value, an error is issued and no users are removed from groups. Default 500.
+- `maxRetirements (integer)` The maximum number of pending retirements allowed. If the count of rows with RetirementDate today or earlier that were not processed yet is equal to or greater than this value, an error is issued and no users are removed from groups. Default 500.
 
 - `maxChanges (integer)` The maximum number of pending user changes allowed. If the count is equal to or greater than this value, an error is issued and no users are updated. Default 500.
+
+- `maxSyncRetries (integer)` How many runs a failing user update is retried before the row is skipped (see the SyncErrorCount column below). Retirements are not skipped, they are retried on every run until they succeed. Default 3.
 
 - `licenseGroups (string)` Required. Comma separated string of AAD group object id's, retired users will be removed from those groups.
 
@@ -92,6 +94,9 @@ CREATE TABLE [dbo].[Pratim_pp](
 	[RetirementDate] [datetime] NULL,
 	[isActive] [bit] NULL,
 	[Synced] [bit] NOT NULL DEFAULT 0,
+	[SyncErrorCount] [int] NOT NULL DEFAULT 0,
+	[RetirementProcessed] [bit] NOT NULL DEFAULT 0,
+	[RowVer] [rowversion] NOT NULL,
  CONSTRAINT [PK_Pratim_pp] PRIMARY KEY CLUSTERED 
 (
 	[TZ] ASC
@@ -103,8 +108,21 @@ GO
 
 - `TZ` The employee id, used with userPrincipalNameSuffix to build the userPrincipalName.
 - `AADObjectID` The AAD object id of the user, rows without it are skipped.
-- `Synced` Set to 1 by the application after the row was handled. The HR feed should set it back to 0 when a row changes.
-- `RetirementDate` When the date has passed the user is removed from the license groups instead of being updated.
+- `Synced` Set to 1 by the application after a successful update. The HR feed should set it back to 0 (together with SyncErrorCount) when a row changes.
+- `RetirementDate` When the date has passed the user is removed from the license groups (and disabled when disableUsers is true) instead of being updated.
+- `RetirementProcessed` Set to 1 by the application after the retirement was handled, and back to 0 when the user is updated again. The HR feed should also set it back to 0 when it changes RetirementDate (a rehired user that retires again).
+- `SyncErrorCount` Incremented when handling a row fails. User updates are skipped after maxSyncRetries failures (a warning with the skipped count is logged and mailed), retirements keep being retried every run. Reset to 0 on success, reset it manually to retry a skipped row.
+- `RowVer` Used to detect rows the HR feed changed while a sync was running, so the change is not lost.
+
+For an existing HR table only the sync columns need to be added. Mark all the past retirements as processed, otherwise they will all be picked up again (and disabled) on the first run:
+
+```sql
+ALTER TABLE [dbo].[Pratim_pp] ADD [AADObjectID] [nvarchar](50) NULL, [Synced] [bit] NOT NULL DEFAULT 0, [SyncErrorCount] [int] NOT NULL DEFAULT 0, [RetirementProcessed] [bit] NOT NULL DEFAULT 0, [RowVer] [rowversion] NOT NULL
+GO
+UPDATE [dbo].[Pratim_pp] SET RetirementProcessed=1 WHERE RetirementDate <= GETDATE()
+GO
+
+```
 
 ### The application requires a log table in the same database:
 ```sql
@@ -145,11 +163,11 @@ You should see the following roles:
 
 *User.ReadWrite.All*
 
-*Directory.ReadWrite.All*
-
-*Group.ReadWrite.All*
+*User.EnableDisableAccount.All*
 
 *GroupMember.ReadWrite.All*
+
+*Directory.Read.All*
 
 *Mail.Send*
 

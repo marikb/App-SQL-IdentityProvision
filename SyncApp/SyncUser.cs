@@ -12,6 +12,8 @@ namespace SyncApp
         public bool? isActive {get;set;}
         public bool synced {get;set;}
         public string aadObjectID { get; set; }
+        public byte[] rowVer { get; set; }
+        public string upn { get { return $"{tz}{Program.userPrincipalNameSuffix}"; } }
 
         public SyncUser(SqlDataReader reader)
         {
@@ -20,6 +22,7 @@ namespace SyncApp
             this.lastName = reader["LastName"].ToString();
             this.mobilePhone = reader["MobilePhone"].ToString();
             this.aadObjectID = reader["AADObjectID"].ToString();
+            this.rowVer = (byte[])reader["RowVer"];
 
             int colIndex = reader.GetOrdinal("RetirementDate");
             if(!reader.IsDBNull(colIndex))

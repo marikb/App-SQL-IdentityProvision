@@ -15,6 +15,7 @@ namespace SyncApp
         public static bool disableUsers = false;
         public static bool debug = false;
         public static int usersUpdated = 0;
+        public static int retirementsProcessed = 0;
         public static int errors = 0;
 
         static async Task<int> Main(string[] args)
@@ -55,6 +56,12 @@ namespace SyncApp
             if(!parsed)
                 maxChanges = 500;
 
+            string strMaxSyncRetries = GetValue("maxSyncRetries");
+            int maxSyncRetries;
+            parsed = int.TryParse(strMaxSyncRetries, out maxSyncRetries);
+            if(!parsed || maxSyncRetries < 1)
+                maxSyncRetries = 3;
+
             string strLicenseGroups = GetValue("licenseGroups");
             #endregion
 
@@ -81,7 +88,7 @@ namespace SyncApp
                 return 1;
             }
 
-            DBHelper db = new DBHelper(sqlConnString);
+            DBHelper db = new DBHelper(sqlConnString, maxSyncRetries);
             await db.Connect();
             db.WriteLog("INFORMATION", $"Starting synchronization");
 
@@ -103,19 +110,24 @@ namespace SyncApp
                 db.WriteLog("ERROR", $"There are {numberOfChanges} changes which is at or over the allowed number ({maxChanges}).");
             }
 
+            var numberOfSkipped = await db.GetNumberOfSkippedChangesFromDB();
+            if(numberOfSkipped > 0)
+                db.WriteLog("WARNING", $"{numberOfSkipped} users are skipped after failing {maxSyncRetries} times, reset SyncErrorCount to retry them.");
 
             watch.Stop();
             string message, subject;
             if(errors > 0){
                 subject = "Synchronization finished with errors";
                 message = $"Synchronization finished with errors please check the log table,\n" +
-                $"Updated {usersUpdated} users in {watch.ElapsedMilliseconds * 0.001} seconds.\n" +
+                $"Updated {usersUpdated} users, processed {retirementsProcessed} retirements in {watch.ElapsedMilliseconds * 0.001} seconds.\n" +
                 $"Errors: {errors}";
             }else{
                 subject = "Synchronization finished";
                 message = $"Synchronization finished,\n" +
-                $"Updated {usersUpdated} users in {watch.ElapsedMilliseconds * 0.001} seconds.";
+                $"Updated {usersUpdated} users, processed {retirementsProcessed} retirements in {watch.ElapsedMilliseconds * 0.001} seconds.";
             }
+            if(numberOfSkipped > 0)
+                message += $"\nSkipped users: {numberOfSkipped} (failed {maxSyncRetries} times, reset SyncErrorCount to retry them)";
             db.WriteLog("INFORMATION", message);
             db.Disconnect();
             WriteLog("i",message);
@@ -124,30 +136,54 @@ namespace SyncApp
         }
 
         public static async Task HandleUserUpdates(DBHelper db, int rowsPerCycle){
-            List<SyncUser> syncUsers = new List<SyncUser>();
+            string lastTZ = "";
             while (true)
             {
-                syncUsers = await db.GetUsersFromDB(rowsPerCycle);
+                var syncUsers = await db.GetUsersFromDB(rowsPerCycle, lastTZ);
                 if (syncUsers.Count == 0)
                     break;
-                foreach (SyncUser syncUser in syncUsers)
-                    await GraphHelper.UpdateUserInGraph(syncUser, db);
+                foreach (SyncUser syncUser in syncUsers){
+                    if (await GraphHelper.UpdateUserInGraph(syncUser, db))
+                        await db.MarkSynced(syncUser.tz, syncUser.rowVer);
+                    else
+                        await db.IncrementSyncErrorCount(syncUser.tz);
+                }
+                lastTZ = syncUsers[syncUsers.Count - 1].tz;
             }
         }
 
         public static async Task HandleGroupRemoval(DBHelper db, int rowsPerCycle, List<string> licenseGroups){
-            List<SyncUser> syncUsers = new List<SyncUser>();
+            string lastTZ = "";
             while(true){
-                syncUsers = await db.GetRetirementsFromDB(rowsPerCycle);
+                var syncUsers = await db.GetRetirementsFromDB(rowsPerCycle, lastTZ);
                 if (syncUsers.Count == 0)
                     break;
 
                 foreach (SyncUser syncUser in syncUsers){
-                    var groups2Remove = await GraphHelper.CheckUserGroupsInGraph(licenseGroups,syncUser, db);
-                    foreach(var group in groups2Remove)
-                        await GraphHelper.RemoveUserFromGroupInGraph(syncUser,group,db);
+                    if (await ProcessRetirementInGraph(syncUser, db, licenseGroups)){
+                        await db.MarkRetirementProcessed(syncUser.tz);
+                        retirementsProcessed++;
+                    }else
+                        await db.IncrementSyncErrorCount(syncUser.tz);
                 }
+                lastTZ = syncUsers[syncUsers.Count - 1].tz;
             }
+        }
+
+        public static async Task<bool> ProcessRetirementInGraph(SyncUser syncUser, DBHelper db, List<string> licenseGroups){
+            if (disableUsers && !await GraphHelper.DisableUserInGraph(syncUser, db))
+                return false;
+
+            var groups2Remove = await GraphHelper.CheckUserGroupsInGraph(licenseGroups, syncUser, db);
+            if (groups2Remove == null)
+                return false;
+
+            bool processed = true;
+            foreach(var group in groups2Remove){
+                if (!await GraphHelper.RemoveUserFromGroupInGraph(syncUser, group, db))
+                    processed = false;
+            }
+            return processed;
         }
 
         public static string GetValue(string valueName){
